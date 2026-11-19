@@ -1,4 +1,4 @@
-"""Core BMS Watch engine: Scraping, Prime Seating Geometry, SQLite Storage, and Email Alerts.
+"""Core BMS Watch engine: Scraping, SQLite Storage, and Email Alerts.
 
 Runs with ZERO external dependencies (standard library only) for 100% local portability.
 """
@@ -7,11 +7,14 @@ import html
 import json
 import logging
 import os
+import re
 import smtplib
 import sqlite3
+import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -62,6 +65,9 @@ POPULAR_REGIONS = [
 
 POPULAR_FORMATS = ["IMAX 3D", "IMAX 2D", "EPIQ", "PXL", "ICE", "4DX", "ScreenX", "DOLBY ATMOS", "3D", "2D"]
 
+# Common names BMS's own alias data leaves out (it already has bombay, madras, cochin, mysore...)
+EXTRA_CITY_ALIASES = {"BANG": ["bangalore"], "KOLK": ["calcutta"], "PUNE": ["poona"], "COIM": ["kovai"]}
+
 log = logging.getLogger("bms_watch.core")
 
 _CACHE_REGIONS = None
@@ -77,18 +83,26 @@ def get_bms_regions() -> list[dict]:
         with urllib.request.urlopen(req, timeout=10) as r:
             d = json.load(r)
         bms = d.get("BookMyShow", {})
-        top = bms.get("TopCities", [])
-        top_cities = []
-        for c in top:
-            top_cities.append({
-                "code": c.get("RegionCode"),
-                "name": c.get("RegionName"),
-                "slug": c.get("RegionSlug"),
-                "image": c.get("Image", {}).get("Selected") or c.get("Image", {}).get("NotSelected")
-            })
-        if top_cities:
-            _CACHE_REGIONS = top_cities
-            return top_cities
+        cities = []
+        for group in ("TopCities", "OtherCities"):
+            for c in bms.get(group, []):
+                try:
+                    lat, lon = float(c["Lat"]), float(c["Long"])
+                except (KeyError, TypeError, ValueError):
+                    lat = lon = None
+                cities.append({
+                    "code": c.get("RegionCode"),
+                    "name": c.get("RegionName"),
+                    "slug": c.get("RegionSlug"),
+                    "lat": lat,
+                    "lon": lon,
+                    "top": group == "TopCities",
+                    "aliases": (c.get("Alias") or []) + EXTRA_CITY_ALIASES.get(c.get("RegionCode"), []),
+                    "state": c.get("StateName") or "",
+                })
+        if cities:
+            _CACHE_REGIONS = cities
+            return cities
     except Exception:
         log.exception("Failed fetching live BMS regions, using fallback list")
     return POPULAR_REGIONS
@@ -109,31 +123,38 @@ def get_bms_movies(region_code: str = "COIM", region_slug: str = "coimbatore", e
     headers["x-bms-id"] = str(uuid.uuid4())
 
     exp = "upcoming-movies" if explore_type in ("upcoming", "upcoming-movies") else "movies"
-    params = urllib.parse.urlencode({
-        "exploreType": exp,
-        "regionCode": region_code,
-        "regionSlug": region_slug
-    })
-    url = f"https://in.bookmyshow.com/api/explore/v1/discover/movies?{params}"
+    params = urllib.parse.urlencode({"region": region_code})
+    url = f"https://in.bookmyshow.com/api/explore/v1/discover/{exp}-{urllib.parse.quote(region_slug)}?{params}"
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=12) as r:
             d = json.load(r)
-        items = d.get("meta", {}).get("ldSchema", {}).get("itemListSchema", {}).get("itemListElement", [])
-        movies = []
-        for it in items:
-            u = it.get("url", "")
-            parts = u.rstrip("/").split("/")
-            code = parts[-1] if parts and parts[-1].startswith("ET") else ""
-            slug = parts[-2] if len(parts) >= 2 else ""
-            movies.append({
-                "name": it.get("name"),
-                "image": it.get("image"),
-                "url": u,
-                "event_code": code,
-                "slug": slug,
-                "type": explore_type
-            })
+        # Read the listing cards, not meta.ldSchema: that SEO summary is capped at 10 films.
+        movies, seen = [], set()
+
+        def walk(o):
+            if isinstance(o, list):
+                for x in o:
+                    walk(x)
+            elif isinstance(o, dict):
+                m = re.search(r"/movies/[^/]+/([^/]+)/(ET\d+)", str(o.get("ctaUrl", "")))
+                if m and m.group(2) not in seen:
+                    seen.add(m.group(2))
+                    texts = [c.get("text", "") for t in o.get("text", []) for c in t.get("components", []) if c.get("type") == "text"]
+                    movies.append({
+                        "name": texts[0] if texts else (o.get("image") or {}).get("altText", ""),
+                        "subtitle": " · ".join(t.strip() for t in texts[1:] if t.strip()),
+                        "image": (o.get("image") or {}).get("url", ""),
+                        "url": o["ctaUrl"],
+                        "event_code": m.group(2),
+                        "slug": m.group(1),
+                        "type": explore_type,
+                    })
+                    return
+                for v in o.values():
+                    walk(v)
+
+        walk(d.get("listings", []))
         if movies:
             _CACHE_MOVIES[cache_key] = (now, movies)
             return movies
@@ -167,8 +188,6 @@ def init_db():
             dates TEXT NOT NULL,           -- JSON array of YYYYMMDD strings
             cinemas TEXT DEFAULT '[]',     -- JSON array of cinema names (empty = all)
             formats TEXT DEFAULT '[]',     -- JSON array of formats (empty = all)
-            prime_seats_only INTEGER DEFAULT 0,
-            min_seats_together INTEGER DEFAULT 2,
             email TEXT NOT NULL,
             is_active INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
@@ -197,96 +216,12 @@ def init_db():
             conn.execute("ALTER TABLE watches ADD COLUMN user_id TEXT")
         except sqlite3.OperationalError:
             pass  # Already exists
-        # Seed default watch from bms_watch.py if database is fresh
-        cur = conn.cursor()
-        cur.execute("SELECT count(*) FROM watches")
-        if cur.fetchone()[0] == 0:
-            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            conn.execute("""
-            INSERT INTO watches (
-                movie_title, event_code, movie_slug, region_code, region_slug,
-                language, dates, cinemas, formats, prime_seats_only, min_seats_together,
-                email, is_active, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-            """, (
-                "Avengers: Doomsday", "ET00526306", "avengers-doomsday",
-                "COIM", "coimbatore", "english",
-                json.dumps(["20261217", "20261218", "20261219", "20261220", "20261221"]),
-                json.dumps([]),
-                json.dumps([]),
-                0, 2,
-                DEFAULT_SMTP_USER or "mishal0404@gmail.com",
-                now
-            ))
-            conn.commit()
-
-
-# ---------------------------------------------------------------------------
-# Prime Seating Detection Engine
-# ---------------------------------------------------------------------------
-
-class PrimeSeatingEngine:
-    """Evaluates spatial geometry & seat categories to identify prime sweet-spot seating."""
-
-    PREMIUM_CATEGORIES = {"RECLINER", "VIP", "CLUB", "PLATINUM", "EXECUTIVE", "ELITE", "BALCONY"}
-    AVOID_CATEGORIES = {"NORMAL", "BUDGET", "FRONT", "SILVER"}
-
-    @staticmethod
-    def is_sweet_spot(row_idx: int, total_rows: int, col_idx: int, total_cols: int) -> bool:
-        """Determines if a seat coordinate lies within the optical and acoustic sweet spot."""
-        if total_rows <= 0 or total_cols <= 0:
-            return True
-        # Middle to back rows: 40% to 85% depth from screen
-        row_ratio = row_idx / total_rows
-        in_row_zone = 0.35 <= row_ratio <= 0.90
-
-        # Center columns: 35% to 65% of screen width
-        col_ratio = col_idx / total_cols
-        in_col_zone = 0.32 <= col_ratio <= 0.68
-
-        return in_row_zone and in_col_zone
-
-    @classmethod
-    def evaluate_layout(cls, seat_layout: dict, min_adjacent: int = 2) -> dict:
-        """Evaluates a raw BookMyShow seat layout dictionary.
-        Returns: { 'has_prime_seats': bool, 'prime_count': int, 'categories': list }
-        """
-        prime_count = 0
-        categories_found = set()
-
-        areas = seat_layout.get("areas", []) or seat_layout.get("colAreas", {}).get("objArea", [])
-        for area in areas:
-            desc = (area.get("AreaDesc") or area.get("areaDesc") or "").upper()
-            rows = area.get("objRow", []) or area.get("rows", [])
-            total_rows = len(rows)
-
-            for r_idx, row in enumerate(rows):
-                seats = row.get("objSeat", []) or row.get("seats", [])
-                total_cols = len(seats)
-                adjacent_streak = 0
-
-                for c_idx, seat in enumerate(seats):
-                    # Check seat status: 0 or "0" or "available" is open
-                    status = str(seat.get("SeatStatus", seat.get("status", "1"))).lower()
-                    is_available = status in ("0", "available")
-
-                    # Check position
-                    is_prime_pos = cls.is_sweet_spot(r_idx, total_rows, c_idx, total_cols)
-                    is_premium_tier = any(p in desc for p in cls.PREMIUM_CATEGORIES)
-
-                    if is_available and (is_prime_pos or is_premium_tier):
-                        adjacent_streak += 1
-                        if adjacent_streak >= min_adjacent:
-                            prime_count += 1
-                            categories_found.add(desc)
-                    else:
-                        adjacent_streak = 0
-
-        return {
-            "has_prime_seats": prime_count > 0,
-            "prime_count": prime_count,
-            "categories": sorted(categories_found)
-        }
+        # Prime-seat feature was removed; drop its columns from older databases
+        for col in ("prime_seats_only", "min_seats_together"):
+            try:
+                conn.execute(f"ALTER TABLE watches DROP COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass  # already gone
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +241,98 @@ def fetch_bms_showtimes(event_code: str, date: str, region_code: str, region_slu
     req = urllib.request.Request(f"{BMS_SHOWTIMES_API}?{q}", headers=headers)
     with urllib.request.urlopen(req, timeout=25) as r:
         return json.load(r)
+
+
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))  # BMS is India-only
+
+
+def today_ist() -> str:
+    return datetime.datetime.now(IST).strftime("%Y%m%d")
+
+
+def response_date(resp: dict) -> str:
+    """BMS answers a not-yet-bookable date with the FIRST bookable date's shows; this is the date it actually returned."""
+    return str(resp.get("data", {}).get("additionalData", {}).get("dateCode", ""))
+
+
+def bookable_dates(resp: dict) -> list[str]:
+    found = set()
+
+    def walk(o):
+        if isinstance(o, dict):
+            cta = o.get("cta")
+            if isinstance(cta, dict) and cta.get("type") == "dateSelector":
+                code = str(cta.get("additionalData", {}).get("dateCode", ""))
+                if len(code) == 8 and code.isdigit():
+                    found.add(code)
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(resp.get("data", {}))
+    return sorted(found)
+
+
+_CACHE_RELEASE = {}
+_CACHE_VENUES = {}
+
+
+def get_release_date(event_code: str, region_slug: str, movie_slug: str) -> str | None:
+    """Release date (YYYYMMDD) scraped from the public movie page; None if unknown."""
+    if event_code in _CACHE_RELEASE:
+        return _CACHE_RELEASE[event_code]
+    url = f"https://in.bookmyshow.com/movies/{urllib.parse.quote(region_slug)}/{urllib.parse.quote(movie_slug or 'movie')}/{urllib.parse.quote(event_code)}"
+    try:
+        req = urllib.request.Request(url, headers={**BMS_HEADERS, "Accept": "text/html"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            page = r.read().decode("utf-8", "ignore")
+    except Exception:
+        log.warning("Could not read release date for %s", event_code)
+        return None
+    m = re.search(r'"releaseDate":"(\d{4})-(\d{2})-(\d{2})T', page)
+    _CACHE_RELEASE[event_code] = "".join(m.groups()) if m else None
+    return _CACHE_RELEASE[event_code]
+
+
+def get_city_venues(region_code: str, region_slug: str) -> list[str]:
+    """BMS has no public cinema list per city, so collect venues from the top running films' showtimes.
+    ponytail: only sees cinemas currently showing one of the top 6 films; add a venue API if BMS exposes one."""
+    cached = _CACHE_VENUES.get(region_code)
+    if cached and time.time() - cached[0] < 6 * 3600:
+        return cached[1]
+    movies = [m for m in get_bms_movies(region_code, region_slug, "movies") if m.get("event_code")][:6]
+
+    def venues_for(m):
+        try:
+            return set(parse_bms_showtimes(fetch_bms_showtimes(m["event_code"], today_ist(), region_code, region_slug)))
+        except Exception:
+            return set()
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        venues = sorted(set().union(*pool.map(venues_for, movies)))
+    if venues:
+        _CACHE_VENUES[region_code] = (time.time(), venues)
+    return venues
+
+
+def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_slug: str) -> dict:
+    """What the watch form needs: earliest watchable date, already-bookable dates, and cinemas."""
+    today = today_ist()
+    raw = fetch_bms_showtimes(event_code, today, region_code, region_slug)
+    dates = [d for d in bookable_dates(raw) if d >= today]
+    venues = sorted(parse_bms_showtimes(raw)) if dates else []
+    release = None if dates else get_release_date(event_code, region_slug, movie_slug)
+    earliest = max(today, dates[0] if dates else (release or today))
+    return {
+        "today": today,
+        "release_date": release,
+        "earliest_date": earliest,
+        "bookable_dates": dates,
+        "venues": venues or get_city_venues(region_code, region_slug),
+        "venues_source": "movie" if venues else "city",
+    }
 
 
 def parse_bms_showtimes(resp: dict) -> dict:
@@ -560,10 +587,24 @@ def send_email_alert(watch: dict, changes_by_date: dict, smtp_user: str = "", sm
 # Poller & Execution Cycle
 # ---------------------------------------------------------------------------
 
+_CHECK_LOCK = threading.Lock()
+
+
 def run_check_cycle() -> dict:
     """Executes a single checking cycle across all active watches.
     Returns: summary dict with change count and logs.
+    Overlapping calls (poller + manual "look now") return {"status": "busy"}
+    instead of running twice and sending duplicate emails.
     """
+    if not _CHECK_LOCK.acquire(blocking=False):
+        return {"status": "busy", "watches_checked": 0, "total_changes": 0}
+    try:
+        return _run_check_cycle()
+    finally:
+        _CHECK_LOCK.release()
+
+
+def _run_check_cycle() -> dict:
     init_db()
     with get_db() as conn:
         watches = [dict(row) for row in conn.execute("SELECT * FROM watches WHERE is_active = 1").fetchall()]
@@ -577,6 +618,8 @@ def run_check_cycle() -> dict:
     for w in watches:
         dates = json.loads(w.get("dates") or "[]")
         for d in dates:
+            if d < today_ist():
+                continue
             needed_queries.add((w["event_code"], w["region_code"], w["region_slug"], w.get("language", "english"), d))
 
     log.info("Checking %d unique showtime query(s) for %d active watch(es)...", len(needed_queries), len(watches))
@@ -587,7 +630,8 @@ def run_check_cycle() -> dict:
         key = f"{event_code}:{region_code}:{date}"
         try:
             raw = fetch_bms_showtimes(event_code, date, region_code, region_slug, lang)
-            new_snapshots[key] = parse_bms_showtimes(raw)
+            # Not bookable yet -> BMS returns another date's shows. Treat as "no shows yet".
+            new_snapshots[key] = parse_bms_showtimes(raw) if response_date(raw) == date else {}
         except Exception:
             log.exception("Failed fetching showtimes for %s", key)
 

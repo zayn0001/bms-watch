@@ -65,23 +65,16 @@ def main():
 
     # 1. Offline tests
     if args.test:
-        from bms_core import PrimeSeatingEngine, calculate_diff
-        print("Running PrimeSeatingEngine test...")
-        mock_layout = {
-            "areas": [
-                {
-                    "areaDesc": "CLUB",
-                    "rows": [
-                        {"seats": [{"status": "available"}, {"status": "available"}, {"status": "sold"}]}
-                    ]
-                }
-            ]
-        }
-        res = PrimeSeatingEngine.evaluate_layout(mock_layout, min_adjacent=2)
-        assert res["has_prime_seats"] is True, "Prime seating check failed"
+        from bms_core import calculate_diff, response_date
+        print("Running wrong-date fallback test...")
+        assert response_date({"data": {"additionalData": {"dateCode": "20261217"}}}) == "20261217"
         print("Running Diff test...")
         diff = calculate_diff({"A": {"7AM": {"status_label": "SOLD OUT"}}}, {"A": {"7AM": {"status_label": "AVAILABLE"}}})
         assert len(diff) == 1 and diff[0][0] == "changed", "Diff check failed"
+        print("Running overlap-lock test...")
+        import bms_core
+        with bms_core._CHECK_LOCK:
+            assert run_check_cycle()["status"] == "busy", "Concurrent check was not blocked"
         print("All tests passed successfully!")
         return
 

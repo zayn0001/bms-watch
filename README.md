@@ -1,8 +1,8 @@
 # BMS Watch (CineWatch)
 
-Automated movie ticket availability tracker, prime seating finder, and alert system for BookMyShow (BMS).
+Automated movie ticket availability tracker and alert system for BookMyShow (BMS).
 
-Designed for moviegoers and cinephiles who want first-day-first-show (FDFS) and prime seats (middle center rows, IMAX / EPIQ / PXL / 4DX) for high-demand releases without having to manually refresh the site every few minutes.
+Designed for moviegoers and cinephiles who want first-day-first-show (FDFS) in the formats they want (IMAX / EPIQ / PXL / 4DX) for high-demand releases without having to manually refresh the site every few minutes.
 
 ---
 
@@ -76,8 +76,8 @@ SMTP_PORT=465
 python run.py
 ```
 Open **`http://localhost:8000`** in your browser:
-- Interactive Watch Creation Wizard (City, Theatres, Dates, Format Filters, Prime Seating Sweet Spot).
-- Interactive Auditorium Sweet-Spot Seat Preview.
+- City auto-detected from your location (or type to search any BookMyShow city).
+- New-watch form: pick a film, dates from today / release day onwards (bookable dates marked), cinemas multi-select, formats.
 - Active Watches Dashboard with Pause / Resume / Delete actions.
 - "Check Availability Now" manual trigger.
 

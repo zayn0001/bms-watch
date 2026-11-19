@@ -17,6 +17,8 @@ from bms_core import (
     POPULAR_REGIONS,
     ROOT_DIR,
     get_bms_movies,
+    get_movie_info,
+    today_ist,
     get_bms_regions,
     get_db,
     init_db,
@@ -27,34 +29,6 @@ STATIC_DIR = ROOT_DIR / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger("bms_watch.server")
-
-UPCOMING_MOVIES = [
-    {
-        "title": "Avengers: Doomsday",
-        "event_code": "ET00526306",
-        "slug": "avengers-doomsday",
-        "release_date": "2026-12-18",
-        "tag": "Marvel Studios Blockbuster",
-        "poster": "https://assets-in.bmscdn.com/iedb/movies/images/mobile/thumbnail/xlarge/avengers-doomsday-et00526306-1734005886.jpg",
-    },
-    {
-        "title": "Avatar: Fire and Ash",
-        "event_code": "ET00311714",
-        "slug": "avatar-fire-and-ash",
-        "release_date": "2025-12-19",
-        "tag": "James Cameron IMAX 3D Event",
-        "poster": "https://assets-in.bmscdn.com/iedb/movies/images/mobile/thumbnail/xlarge/avatar-fire-and-ash-et00311714-1734005000.jpg",
-    },
-    {
-        "title": "The Batman Part II",
-        "event_code": "ET00358821",
-        "slug": "the-batman-part-ii",
-        "release_date": "2026-10-02",
-        "tag": "DC Universe",
-        "poster": "https://assets-in.bmscdn.com/iedb/movies/images/mobile/thumbnail/xlarge/the-batman-part-ii-et00358821-1683180000.jpg",
-    }
-]
-
 
 class BMSWatchHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -115,8 +89,22 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         if path == "/api/formats":
             return self._json(200, POPULAR_FORMATS)
 
-        if path == "/api/pre-release":
-            return self._json(200, UPCOMING_MOVIES)
+        # Dates + cinemas for the watch form
+        if path == "/api/bms/movie-info":
+            qs = urllib.parse.parse_qs(url.query)
+            event = qs.get("event", [""])[0].upper()
+            if not re.fullmatch(r"ET\d+", event):
+                return self._json(400, {"error": "unknown film"})
+            try:
+                return self._json(200, get_movie_info(
+                    event,
+                    qs.get("region", ["COIM"])[0].upper(),
+                    qs.get("slug", ["coimbatore"])[0].lower(),
+                    qs.get("movie_slug", [""])[0].lower(),
+                ))
+            except Exception:
+                log.exception("movie-info failed for %s", event)
+                return self._json(502, {"error": "Couldn't reach BookMyShow"})
 
         # Watches list (filtered by user if user_id or email query param provided)
         if path == "/api/watches":
@@ -183,17 +171,22 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             dates = payload.get("dates") or []
             cinemas = payload.get("cinemas") or []
             formats = payload.get("formats") or []
-            prime_seats = 1 if payload.get("prime_seats_only") else 0
-            min_seats = int(payload.get("min_seats_together", 2))
             email = payload.get("email", "").strip()
             user_id = payload.get("user_id")
 
             if not event_code:
-                return self._json(400, {"error": "event_code is required (e.g. ET00526306)"})
+                return self._json(400, {"error": "Pick a film first"})
             if not email:
                 return self._json(400, {"error": "email is required"})
             if not dates:
                 return self._json(400, {"error": "At least one date (YYYYMMDD) is required"})
+            if not all(isinstance(d, str) and re.fullmatch(r"\d{8}", d) for d in dates):
+                return self._json(400, {"error": "Dates must be YYYYMMDD strings"})
+            if min(dates) < today_ist():
+                return self._json(400, {"error": "Dates can't be in the past"})
+            if not re.fullmatch(r"ET\d+", event_code.upper()):
+                return self._json(400, {"error": "event_code looks like ET00526306"})
+            event_code = event_code.upper()
 
             import datetime
             now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -202,13 +195,13 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                 cur.execute("""
                 INSERT INTO watches (
                     user_id, movie_title, event_code, movie_slug, region_code, region_slug,
-                    language, dates, cinemas, formats, prime_seats_only, min_seats_together,
+                    language, dates, cinemas, formats,
                     email, is_active, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'english', ?, ?, ?, ?, ?, ?, 1, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'english', ?, ?, ?, ?, 1, ?)
                 """, (
                     user_id, title, event_code, slug, region_code, region_slug,
                     json.dumps(dates), json.dumps(cinemas), json.dumps(formats),
-                    prime_seats, min_seats, email, now
+                    email, now
                 ))
                 new_id = cur.lastrowid
                 conn.commit()
