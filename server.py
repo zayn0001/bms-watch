@@ -66,6 +66,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             return self._json(200, {
                 "supabase_url": os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.co"),
                 "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "")),
+                "turnstile_site_key": os.getenv("TURNSTILE_SITE_KEY", os.getenv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "1x00000000000000000000AA")),
                 "schema": "bms_watch"
             })
 
