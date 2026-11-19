@@ -790,7 +790,7 @@
     async function triggerManualCheck() {
       setScanning(true);
       try {
-        const data = await (await fetch('/api/check-now', { method: 'POST' })).json();
+        const data = await (await authFetch('/api/check-now', { method: 'POST' })).json();
         if (data.status === 'busy') showToast('Already looking. Give it a moment.');
         else showToast(data.total_changes ? `Spotted ${data.total_changes} change(s)! Check your inbox.` : `Looked at ${data.watches_checked} watch(es). Nothing new yet.`);
         loadWatches();

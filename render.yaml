@@ -27,6 +27,9 @@ services:
       # Comma-separated Supabase user ids or emails who see and manage every watch
       - key: ADMIN_UID
         sync: false
+      # Shared secret the scheduled GitHub Action sends to /api/cron (same value as the repo's CRON_SECRET)
+      - key: CRON_SECRET
+        sync: false
       # Supabase Storage in the shared project and private `default` bucket,
       # isolated inside its own folder (MIRROR_PREFIX: bms_watch/)
       - key: MIRROR_ENDPOINT

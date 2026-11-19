@@ -1,38 +1,23 @@
 name: BMS Watch Scheduled Check
 
+# Asks the Render app to run a check. The check runs on Render against its own database,
+# so nothing here touches the data. Every 14 minutes also keeps the free Render service
+# from sleeping (it sleeps after 15 idle minutes).
 on:
   schedule:
-    # Runs directly on GitHub Actions runner every 10 minutes
-    - cron: '*/10 * * * *'
-  workflow_dispatch: # Allows manual run button from GitHub Actions UI
+    - cron: '*/14 * * * *'
+  workflow_dispatch: # Run workflow button in the Actions tab
 
 jobs:
   check-tickets:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Run BMS Watcher (Sync with Supabase & Check BMS)
+      - name: Call /api/cron (wakes Render if asleep)
         env:
-          # SMTP Alert Credentials
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          MAIL_TO: ${{ secrets.MAIL_TO }}
-          SMTP_HOST: smtp.gmail.com
-          SMTP_PORT: '465'
-          # Supabase Storage S3 Mirror (Same project as food-tracker/openGym)
-          MIRROR_ENDPOINT: ${{ secrets.MIRROR_ENDPOINT || 'https://ismyhkcsxrswqsfzfrxe.storage.supabase.co/storage/v1/s3' }}
-          MIRROR_BUCKET: default
-          MIRROR_PREFIX: bms_watch/
-          MIRROR_REGION: ap-southeast-1
-          MIRROR_KEY_ID: ${{ secrets.MIRROR_KEY_ID }}
-          MIRROR_SECRET: ${{ secrets.MIRROR_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        # A sleeping Render service takes 30-60s to start, hence the long timeout and retries.
         run: |
-          # Pure Python standard library - zero pip dependencies needed!
-          python run.py --cli
+          curl -fsS --retry 4 --retry-delay 15 --retry-all-errors --max-time 120 \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            https://bms-watch.onrender.com/api/cron

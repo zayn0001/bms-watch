@@ -3,6 +3,7 @@
 Serves the Web UI dashboard, REST API endpoints, and Render health checks.
 Built using standard library http.server for zero-dependency local execution.
 """
+import hmac
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", ""))
 # Comma-separated Supabase user ids and/or emails who see and manage every watch.
 ADMINS = {a.strip().lower() for a in os.getenv("ADMIN_UID", "").split(",") if a.strip()}
+CRON_SECRET = os.getenv("CRON_SECRET", "")
 _token_cache: dict[str, tuple[float, dict]] = {}
 
 
@@ -116,7 +118,11 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             })
 
         # HTTP Cron endpoint (for external free crons or keep-alive pings)
+        # Scheduled check (GitHub Action / external cron). Needs X-Cron-Secret = CRON_SECRET.
         if path == "/api/cron":
+            given = self.headers.get("X-Cron-Secret", "")
+            if not CRON_SECRET or not hmac.compare_digest(given.encode(), CRON_SECRET.encode()):
+                return self._json(403, {"error": "Bad or missing X-Cron-Secret"})
             res = run_check_cycle()
             return self._json(200, res)
 
@@ -246,6 +252,8 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
 
         # Manual Check Trigger
         if path == "/api/check-now":
+            if not self._user():
+                return self._json(401, {"error": "Sign in first"})
             result = run_check_cycle()
             return self._json(200, result)
 
