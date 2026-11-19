@@ -746,6 +746,30 @@
         supabaseClient = sb.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
           db: { schema: 'bms_watch' }
         });
+
+        // Arriving from a magic sign-in link or OAuth callback
+        const hasAuthParams = window.location.hash.includes('access_token=') || window.location.search.includes('code=');
+        if (hasAuthParams) {
+          const incomingSession = await new Promise(resolve => {
+            const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, sess) => {
+              if (sess) {
+                try { subscription.unsubscribe(); } catch {}
+                resolve(sess);
+              }
+            });
+            setTimeout(() => {
+              try { subscription.unsubscribe(); } catch {}
+              resolve(null);
+            }, 3000);
+          });
+          if (incomingSession) {
+            history.replaceState(null, '', window.location.pathname);
+            currentSession = incomingSession;
+            setAuthSession(incomingSession);
+            return true;
+          }
+        }
+
         const { data: { session } } = await supabaseClient.auth.getSession();
         if (!session) {
           window.location.replace('/login');

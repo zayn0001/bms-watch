@@ -112,7 +112,7 @@
             oninput="handleOtpInput(this)"
           >
           <p class="text-[11px] text-[#8d879a] mt-1.5 flex items-center gap-1.5">
-            <i class="fa-regular fa-clock text-xs"></i>Check spam or promotions if you don't see it within a minute.
+            <i class="fa-regular fa-clock text-xs"></i>Check spam too. You can type your 6-digit code or click the link in your email.
           </p>
         </div>
         <button id="btnVerifyOtp" type="submit" class="btn-primary w-full py-3 text-sm flex items-center justify-center gap-2">
@@ -234,6 +234,28 @@
           initTurnstile(cfg.turnstile_site_key);
         }
 
+        // If arriving via email magic link or oauth callback
+        const hasAuthParams = window.location.hash.includes('access_token=') || window.location.search.includes('code=');
+        if (hasAuthParams) {
+          showNotice('Signing you in from your email link…');
+          const linkSession = await new Promise(resolve => {
+            const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_e, sess) => {
+              if (sess) {
+                try { subscription.unsubscribe(); } catch {}
+                resolve(sess);
+              }
+            });
+            setTimeout(() => {
+              try { subscription.unsubscribe(); } catch {}
+              resolve(null);
+            }, 3000);
+          });
+          if (linkSession) {
+            window.location.replace(redirectUrl);
+            return true;
+          }
+        }
+
         // If already signed in, redirect home
         const { data } = await supabaseClient.auth.getSession();
         if (data?.session) {
@@ -279,7 +301,10 @@
       btn.querySelector('span').textContent = 'Sending code…';
 
       try {
-        const options = { data: { app: 'bms_watch' } };
+        const options = {
+          data: { app: 'bms_watch' },
+          emailRedirectTo: window.location.origin + '/'
+        };
         if (turnstileToken) options.captchaToken = turnstileToken;
 
         const { error } = await supabaseClient.auth.signInWithOtp({ email, options });
@@ -299,11 +324,11 @@
       $('formOtp').classList.remove('hidden');
 
       $('authDocket').textContent = 'Check your email';
-      $('authTitle').textContent = 'Enter your code';
-      $('authSubtitle').innerHTML = `We sent a 6-digit code to <b class="text-sclera">${targetEmail}</b>.`;
+      $('authTitle').textContent = 'Enter your code or click link';
+      $('authSubtitle').innerHTML = `We sent a sign-in email to <b class="text-sclera">${targetEmail}</b>.`;
       $('otpEmailDisplay').textContent = targetEmail;
 
-      showNotice(`A 6-digit code was sent to ${targetEmail}.`);
+      showNotice(`Sign-in instructions sent to ${targetEmail}. Check your email.`);
       $('inpOtp').value = '';
       setTimeout(() => $('inpOtp').focus(), 100);
       startCooldown(60);
@@ -375,14 +400,17 @@
       if (!ready) return;
       showNotice('');
       try {
-        const options = { data: { app: 'bms_watch' } };
+        const options = {
+          data: { app: 'bms_watch' },
+          emailRedirectTo: window.location.origin + '/'
+        };
         if (turnstileToken) options.captchaToken = turnstileToken;
         const { error } = await supabaseClient.auth.signInWithOtp({
           email: targetEmail,
           options
         });
         if (error) throw error;
-        showNotice(`A fresh 6-digit code was sent to ${targetEmail}.`);
+        showNotice(`A fresh sign-in email was sent to ${targetEmail}.`);
         startCooldown(60);
       } catch (err) {
         showNotice(friendlyError(err.message), true);
