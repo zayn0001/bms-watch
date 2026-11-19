@@ -17,6 +17,7 @@ from bms_core import (
     POPULAR_REGIONS,
     ROOT_DIR,
     get_bms_movies,
+    get_city_venues,
     get_movie_info,
     today_ist,
     get_bms_regions,
@@ -88,6 +89,13 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/formats":
             return self._json(200, POPULAR_FORMATS)
+
+        # Dynamic BMS Venues / Cinemas in a city
+        if path in ("/api/venues", "/api/bms/venues"):
+            qs = urllib.parse.parse_qs(url.query)
+            region = qs.get("region", ["COIM"])[0].upper()
+            slug = qs.get("slug", ["coimbatore"])[0].lower()
+            return self._json(200, get_city_venues(region, slug))
 
         # Dates + cinemas for the watch form
         if path == "/api/bms/movie-info":

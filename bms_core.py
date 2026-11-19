@@ -296,25 +296,57 @@ def get_release_date(event_code: str, region_slug: str, movie_slug: str) -> str 
     return _CACHE_RELEASE[event_code]
 
 
-def get_city_venues(region_code: str, region_slug: str) -> list[str]:
-    """BMS has no public cinema list per city, so collect venues from the top running films' showtimes.
-    ponytail: only sees cinemas currently showing one of the top 6 films; add a venue API if BMS exposes one."""
+def get_city_venues(region_code: str, region_slug: str = "") -> list[str]:
+    """Fetch all movie theatres in the given region from BMS mobile venues API.
+    Falls back to collecting venues from top running films' showtimes if API fails."""
     cached = _CACHE_VENUES.get(region_code)
     if cached and time.time() - cached[0] < 6 * 3600:
         return cached[1]
-    movies = [m for m in get_bms_movies(region_code, region_slug, "movies") if m.get("event_code")][:6]
 
-    def venues_for(m):
-        try:
-            return set(parse_bms_showtimes(fetch_bms_showtimes(m["event_code"], today_ist(), region_code, region_slug)))
-        except Exception:
-            return set()
+    # Primary: Official BMS mobile venues endpoint
+    try:
+        params = urllib.parse.urlencode({
+            "token": "67x1xa33b4x422b361ba",
+            "regionCode": region_code,
+            "eventType": "MT",
+        })
+        url = f"https://in.bookmyshow.com/api/v2/mobile/venues?{params}"
+        headers = {**BMS_HEADERS, "x-app-code": "WEB", "Accept": "application/json"}
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = json.load(r)
+            venues_raw = data.get("venues") or []
+            names = set()
+            for v in venues_raw:
+                name = v.get("VenueName") or v.get("venueName") or v.get("name")
+                if name:
+                    names.add(name.strip())
+            if names:
+                result = sorted(names)
+                _CACHE_VENUES[region_code] = (time.time(), result)
+                return result
+    except Exception:
+        log.exception("Failed fetching venues from mobile API for %s", region_code)
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        venues = sorted(set().union(*pool.map(venues_for, movies)))
-    if venues:
-        _CACHE_VENUES[region_code] = (time.time(), venues)
-    return venues
+    # Fallback: scrape from top running movies
+    try:
+        movies = [m for m in get_bms_movies(region_code, region_slug, "movies") if m.get("event_code")]
+
+        def venues_for(m):
+            try:
+                return set(parse_bms_showtimes(fetch_bms_showtimes(m["event_code"], today_ist(), region_code, region_slug)))
+            except Exception:
+                return set()
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            venues = sorted(set().union(*pool.map(venues_for, movies[:10])))
+        if venues:
+            _CACHE_VENUES[region_code] = (time.time(), venues)
+            return venues
+    except Exception:
+        log.exception("Fallback venue scrape failed for %s", region_code)
+
+    return []
 
 
 def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_slug: str) -> dict:
@@ -322,7 +354,9 @@ def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_sl
     today = today_ist()
     raw = fetch_bms_showtimes(event_code, today, region_code, region_slug)
     dates = [d for d in bookable_dates(raw) if d >= today]
-    venues = sorted(parse_bms_showtimes(raw)) if dates else []
+    movie_venues = sorted(parse_bms_showtimes(raw)) if dates else []
+    city_venues = get_city_venues(region_code, region_slug)
+    all_venues = sorted(set(city_venues) | set(movie_venues))
     release = None if dates else get_release_date(event_code, region_slug, movie_slug)
     earliest = max(today, dates[0] if dates else (release or today))
     return {
@@ -330,8 +364,9 @@ def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_sl
         "release_date": release,
         "earliest_date": earliest,
         "bookable_dates": dates,
-        "venues": venues or get_city_venues(region_code, region_slug),
-        "venues_source": "movie" if venues else "city",
+        "movie_venues": movie_venues,
+        "venues": all_venues or city_venues or movie_venues,
+        "venues_source": "movie" if movie_venues else "city",
     }
 
 

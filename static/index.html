@@ -283,6 +283,8 @@
     let currentSession = null;
     let currentCity = { code: 'COIM', slug: 'coimbatore', name: 'Coimbatore' };
     let regions = [];
+    let cityVenues = [];
+    let loadingVenues = false;
     const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
                     set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
     let selectedFormats = new Set();
@@ -360,11 +362,33 @@
       try { regions = await (await fetch('/api/regions')).json(); } catch (err) { console.error('regions', err); }
     }
 
+    async function loadCityVenues() {
+      loadingVenues = true;
+      renderCinemas();
+      try {
+        const res = await fetch(`/api/bms/venues?region=${encodeURIComponent(currentCity.code)}&slug=${encodeURIComponent(currentCity.slug)}`);
+        if (res.ok) {
+          cityVenues = await res.json();
+        }
+      } catch (err) {
+        console.error('venues', err);
+      } finally {
+        loadingVenues = false;
+        renderCinemas();
+      }
+    }
+
     function setCity(city, refetch = true) {
+      const cityChanged = currentCity.code !== city.code;
       currentCity = { code: city.code, slug: city.slug, name: city.name };
       document.querySelectorAll('.city-box input').forEach(i => { if (document.activeElement !== i) i.value = city.name; });
       $('heroKicker').textContent = `Eyes on ${city.name}`;
       $('formCity').textContent = city.name;
+      if (cityChanged) {
+        selectedCinemas.clear();
+        movieInfo = null;
+      }
+      loadCityVenues();
       if (!refetch) return;
       fetchMovies('movies');
       fetchMovies('upcoming');
@@ -495,11 +519,11 @@
     async function onFilmChange() {
       const m = filmByCode($('fFilm').value);
       infoKey = $('fFilm').value + currentCity.code;
-      selectedDates.clear(); selectedCinemas.clear(); movieInfo = null;
+      selectedDates.clear(); movieInfo = null;
       renderDates(); renderCinemas();
       if (!m) return;
       $('dateNote').textContent = 'Checking BookMyShow for dates…';
-      $('cinemaNote').textContent = '';
+      $('cinemaNote').textContent = 'Checking BookMyShow for showtimes…';
       const q = new URLSearchParams({ event: m.event_code, region: currentCity.code, slug: currentCity.slug, movie_slug: m.slug || '' });
       try {
         const res = await fetch(`/api/bms/movie-info?${q}`);
@@ -507,8 +531,12 @@
         if ($('fFilm').value !== m.event_code) return;   // user picked another film meanwhile
         if (!res.ok) throw new Error(info.error);
         movieInfo = info;
-      } catch { $('dateNote').textContent = "Couldn't reach BookMyShow. Try again in a moment."; return; }
-      renderDates(); renderCinemas();
+      } catch {
+        $('dateNote').textContent = "Couldn't reach BookMyShow. Try again in a moment.";
+        return;
+      } finally {
+        renderDates(); renderCinemas();
+      }
     }
 
     function pickMovie(type, i) {
@@ -565,18 +593,38 @@
 
     // ---------------------------------------------------------------- cinemas multi-select
     function renderCinemas() {
-      const venues = movieInfo?.venues || [];
+      const venues = (movieInfo?.venues?.length ? movieInfo.venues : cityVenues) || [];
+      const openVenues = new Set(movieInfo?.movie_venues || []);
       const f = $('cinemaFilter').value.trim().toLowerCase();
-      $('cinemaList').innerHTML = venues.length
-        ? venues.filter(v => v.toLowerCase().includes(f)).map(v => `
-            <label class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-lash cursor-pointer text-sm">
-              <input type="checkbox" class="accent-[#e39a3b]" ${selectedCinemas.has(v) ? 'checked' : ''} onchange="this.checked ? selectedCinemas.add(this.value) : selectedCinemas.delete(this.value); renderCinemaSummary()" value="${esc(v)}">
-              <span class="truncate">${esc(v)}</span>
-            </label>`).join('') || `<p class="px-2 py-2 text-sm text-[#8d879a]">No cinema matches.</p>`
-        : `<p class="px-2 py-2 text-sm text-[#8d879a]">${$('fFilm').value ? 'No cinemas found yet.' : 'Pick a film first.'}</p>`;
-      $('cinemaNote').textContent = !movieInfo ? '' : movieInfo.venues_source === 'city'
-        ? 'Not showing anywhere yet, so these are cinemas currently screening films in your city.'
-        : 'Cinemas showing this film. Leave empty to watch all of them.';
+      const filtered = venues.filter(v => v.toLowerCase().includes(f));
+
+      if (loadingVenues && !venues.length) {
+        $('cinemaList').innerHTML = `<p class="px-2 py-2 text-sm text-[#8d879a]"><i class="fa-solid fa-spinner fa-spin mr-1.5 text-iris"></i>Loading cinemas in ${esc(currentCity.name)}…</p>`;
+      } else if (filtered.length) {
+        $('cinemaList').innerHTML = filtered.map(v => {
+          const isOpen = openVenues.has(v);
+          return `
+            <label class="flex items-center justify-between gap-2.5 px-2 py-1.5 rounded-lg hover:bg-lash cursor-pointer text-sm">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <input type="checkbox" class="accent-[#e39a3b] shrink-0" ${selectedCinemas.has(v) ? 'checked' : ''} onchange="this.checked ? selectedCinemas.add(this.value) : selectedCinemas.delete(this.value); renderCinemaSummary()" value="${esc(v)}">
+                <span class="truncate">${esc(v)}</span>
+              </div>
+              ${isOpen ? `<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-lens/15 text-lens font-semibold" title="Shows currently open">open</span>` : ''}
+            </label>`;
+        }).join('');
+      } else if (venues.length) {
+        $('cinemaList').innerHTML = `<p class="px-2 py-2 text-sm text-[#8d879a]">No cinema matches "${esc(f)}".</p>`;
+      } else {
+        $('cinemaList').innerHTML = `<p class="px-2 py-2 text-sm text-[#8d879a]">No cinemas found in ${esc(currentCity.name)}.</p>`;
+      }
+
+      if (movieInfo && openVenues.size > 0) {
+        $('cinemaNote').textContent = `Showing ${openVenues.size} cinema(s) with open bookings. Select specific cinemas to watch, or leave empty for all.`;
+      } else if (movieInfo) {
+        $('cinemaNote').textContent = `Not showing anywhere in ${currentCity.name} yet. Pick any cinema(s) to watch for when bookings open.`;
+      } else {
+        $('cinemaNote').textContent = `Pick cinemas in ${currentCity.name} to watch. Leave empty to watch all cinemas.`;
+      }
       renderCinemaSummary();
     }
     function renderCinemaSummary() {
