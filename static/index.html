@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BMS Watch — Movie Ticket & Prime Seating Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: '#eb4e62',
+            brandHover: '#d93b4f',
+            darkBg: '#0b0f17',
+            cardBg: '#131b26',
+            borderCol: '#202b3c',
+            accentGreen: '#1ea83c',
+            accentGold: '#e8a900'
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { background-color: #0b0f17; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .screen-curve {
+      height: 12px;
+      border-radius: 50% / 100% 100% 0 0;
+      background: linear-gradient(180deg, rgba(235, 78, 98, 0.8) 0%, rgba(235, 78, 98, 0.1) 100%);
+      box-shadow: 0 0 25px rgba(235, 78, 98, 0.4);
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-16">
+
+  <!-- Top Navigation -->
+  <header class="border-b border-borderCol bg-cardBg/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-brand flex items-center justify-center text-white shadow-lg shadow-brand/30">
+          <i class="fa-solid fa-ticket"></i>
+        </div>
+        <div>
+          <span class="font-extrabold text-lg tracking-wide text-white">BMS <span class="text-brand">WATCH</span></span>
+          <span class="text-xs text-slate-400 block -mt-1">Prime Seating & Ticket Tracker</span>
+        </div>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button id="btnCheckNow" onclick="triggerManualCheck()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition flex items-center space-x-1.5">
+          <i class="fa-solid fa-rotate" id="checkIcon"></i>
+          <span>Check Availability Now</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+    <!-- Left Column: Watch Creation Wizard -->
+    <div class="lg:col-span-7 space-y-6">
+      
+      <!-- Pre-Release Showcase -->
+      <div class="bg-cardBg border border-borderCol rounded-xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center">
+            <i class="fa-solid fa-fire text-brand mr-2"></i> Upcoming Pre-Release Watches
+          </h2>
+          <span class="text-xs bg-brand/20 text-brand px-2 py-0.5 rounded font-medium">1-Click Watch</span>
+        </div>
+        <p class="text-xs text-slate-400 mb-4">Select an upcoming blockbuster to monitor before bookings go live:</p>
+        <div id="preReleaseGrid" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Main Watch Builder -->
+      <div class="bg-cardBg border border-borderCol rounded-xl p-6 shadow-xl">
+        <h2 class="text-base font-bold text-white mb-4 flex items-center">
+          <i class="fa-solid fa-wand-magic-sparkles text-brand mr-2"></i> Create Ticket Watch
+        </h2>
+
+        <form id="watchForm" onsubmit="handleCreateWatch(event)" class="space-y-5">
+          
+          <!-- Movie Title & Event Code -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Movie Title</label>
+              <input type="text" id="movieTitle" required placeholder="e.g. Avengers: Doomsday" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">BMS Event Code</label>
+              <input type="text" id="eventCode" required placeholder="e.g. ET00526306" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+            </div>
+          </div>
+
+          <!-- City Selection -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">City / Region</label>
+            <select id="regionSelect" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+              <!-- Populated by JS -->
+            </select>
+          </div>
+
+          <!-- Theatres Multi-Select / Filter -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Target Cinemas (Comma-separated, leave blank for ALL)</label>
+            <input type="text" id="cinemaFilter" placeholder="e.g. Broadway, PVR, INOX (blank = all in city)" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+            <p class="text-[11px] text-slate-500 mt-1">Leave empty to alert whenever ANY cinema in this city opens booking.</p>
+          </div>
+
+          <!-- Dates to Watch -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-300">Dates to Watch (YYYYMMDD, comma-separated)</label>
+              <div class="space-x-1.5">
+                <button type="button" onclick="addDatesPreset('dec_doomsday')" class="text-[11px] text-brand hover:underline">+ Doomsday Dates</button>
+                <button type="button" onclick="addDatesPreset('this_weekend')" class="text-[11px] text-slate-400 hover:underline">+ This Weekend</button>
+              </div>
+            </div>
+            <input type="text" id="watchDates" required placeholder="20261217, 20261218, 20261219" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand font-mono">
+          </div>
+
+          <!-- Format Filters -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-2">Filter Formats & Screens</label>
+            <div id="formatPills" class="flex flex-wrap gap-2">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <!-- Prime Seating Section -->
+          <div class="p-4 rounded-lg bg-slate-900/60 border border-borderCol/80">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-sm font-bold text-white flex items-center">
+                  <i class="fa-solid fa-crown text-accentGold mr-2"></i> Prime Seating Identification
+                </span>
+                <p class="text-xs text-slate-400 mt-0.5">Only alert if seats are in the mid-center sweet spot or recliner/club rows</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="primeSeatsToggle" class="sr-only peer">
+                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accentGold"></div>
+              </label>
+            </div>
+
+            <!-- Adjacent Seats Selection -->
+            <div class="mt-3 pt-3 border-t border-borderCol/50 flex items-center justify-between text-xs">
+              <span class="text-slate-300">Min. contiguous seats together:</span>
+              <select id="minSeats" class="bg-slate-800 border border-borderCol text-white rounded px-2 py-1">
+                <option value="1">1 Seat</option>
+                <option value="2" selected>2 Seats Together</option>
+                <option value="3">3 Seats Together</option>
+                <option value="4">4 Seats Together</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- User Email -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Your Email for Instant Alerts</label>
+            <div class="relative">
+              <i class="fa-regular fa-envelope absolute left-3 top-3 text-slate-500 text-sm"></i>
+              <input type="email" id="userEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-borderCol rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1">Alerts include direct BookMyShow booking deep links.</p>
+          </div>
+
+          <button type="submit" class="w-full py-2.5 rounded-lg bg-brand hover:bg-brandHover text-white font-bold text-sm shadow-lg shadow-brand/20 transition flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-bell"></i>
+            <span>Create Movie Watch</span>
+          </button>
+        </form>
+
+      </div>
+    </div>
+
+    <!-- Right Column: Interactive Seat Preview & Active Watches -->
+    <div class="lg:col-span-5 space-y-6">
+
+      <!-- Interactive Sweet-Spot Preview Widget -->
+      <div class="bg-cardBg border border-borderCol rounded-xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center">
+            <i class="fa-solid fa-eye text-brand mr-2"></i> Prime Seating "Sweet Spot" Preview
+          </h3>
+          <span class="text-[11px] text-accentGold font-medium">Optimal Geometry</span>
+        </div>
+
+        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-center relative overflow-hidden">
+          <div class="screen-curve mb-1 mx-4"></div>
+          <span class="text-[10px] text-slate-500 tracking-widest block uppercase font-mono mb-4">Auditorium Screen</span>
+
+          <!-- Simulated Seat Layout -->
+          <div class="space-y-1.5 max-w-[280px] mx-auto text-[9px] font-mono">
+            <!-- Front Rows (Avoid) -->
+            <div class="flex justify-center space-x-1 opacity-30">
+              <div class="px-1 bg-slate-700 rounded text-slate-400">Row A (Neck Strain)</div>
+            </div>
+            <div class="flex justify-center space-x-1 opacity-40">
+              <div class="px-1 bg-slate-700 rounded text-slate-400">Row B (Avoid)</div>
+            </div>
+
+            <!-- Sweet Spot Zone -->
+            <div class="my-2 p-2 rounded border border-accentGold/40 bg-accentGold/10 relative">
+              <div class="text-[10px] text-accentGold font-bold mb-1 flex items-center justify-center">
+                <i class="fa-solid fa-star text-[9px] mr-1"></i> PRIME CENTER SWEET SPOT <i class="fa-solid fa-star text-[9px] ml-1"></i>
+              </div>
+              <div class="flex justify-center space-x-1 my-1">
+                <div class="w-4 h-3 bg-slate-700 rounded opacity-40"></div>
+                <div class="w-4 h-3 bg-accentGreen rounded shadow-sm shadow-accentGreen/50"></div>
+                <div class="w-4 h-3 bg-accentGreen rounded shadow-sm shadow-accentGreen/50"></div>
+                <div class="w-4 h-3 bg-accentGreen rounded shadow-sm shadow-accentGreen/50"></div>
+                <div class="w-4 h-3 bg-slate-700 rounded opacity-40"></div>
+              </div>
+              <div class="text-[9px] text-slate-300">40%-80% Depth &middot; Mid 35%-65% Width</div>
+            </div>
+
+            <!-- Recliner Row -->
+            <div class="flex justify-center space-x-1 text-slate-300">
+              <div class="px-2 py-0.5 bg-brand/30 border border-brand/50 rounded text-brand font-bold text-[9px]">
+                Row P &middot; Recliner / Club Tier
+              </div>
+            </div>
+          </div>
+
+          <p class="text-[11px] text-slate-400 mt-3 text-left">
+            The algorithm filters out front rows A–D and detects adjacent openings in the optical/acoustic center.
+          </p>
+        </div>
+      </div>
+
+      <!-- Active Watches List -->
+      <div class="bg-cardBg border border-borderCol rounded-xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-bold text-white flex items-center">
+            <i class="fa-solid fa-list-check text-brand mr-2"></i> Active Watches
+          </h3>
+          <span id="watchCountBadge" class="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">0</span>
+        </div>
+
+        <div id="watchesList" class="space-y-3">
+          <div class="text-center py-8 text-slate-500 text-xs">Loading watches...</div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 border border-slate-700 text-white text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-2">
+    <i class="fa-solid fa-circle-check text-accentGreen" id="toastIcon"></i>
+    <span id="toastMessage">Success</span>
+  </div>
+
+  <script>
+    let selectedFormats = new Set();
+    let regionsList = [];
+
+    async function init() {
+      await loadRegions();
+      await loadFormats();
+      await loadPreRelease();
+      await loadWatches();
+    }
+
+    async function loadRegions() {
+      const res = await fetch('/api/regions');
+      regionsList = await res.json();
+      const sel = document.getElementById('regionSelect');
+      sel.innerHTML = regionsList.map(r => `<option value="${r.code}" data-slug="${r.slug}">${r.name} (${r.code})</option>`).join('');
+    }
+
+    async function loadFormats() {
+      const res = await fetch('/api/formats');
+      const formats = await res.json();
+      const container = document.getElementById('formatPills');
+      container.innerHTML = formats.map(f => `
+        <button type="button" onclick="toggleFormat('${f}', this)" class="px-2.5 py-1 rounded text-xs border border-borderCol bg-slate-900 hover:border-slate-500 transition text-slate-300 font-medium">
+          ${f}
+        </button>
+      `).join('');
+    }
+
+    function toggleFormat(f, btn) {
+      if (selectedFormats.has(f)) {
+        selectedFormats.delete(f);
+        btn.classList.remove('bg-brand', 'text-white', 'border-brand');
+        btn.classList.add('bg-slate-900', 'text-slate-300');
+      } else {
+        selectedFormats.add(f);
+        btn.classList.add('bg-brand', 'text-white', 'border-brand');
+        btn.classList.remove('bg-slate-900', 'text-slate-300');
+      }
+    }
+
+    async function loadPreRelease() {
+      const res = await fetch('/api/pre-release');
+      const movies = await res.json();
+      const grid = document.getElementById('preReleaseGrid');
+      grid.innerHTML = movies.map(m => `
+        <div onclick="selectPreReleaseMovie('${m.title}', '${m.event_code}', '${m.slug}')" class="cursor-pointer bg-slate-900/80 hover:bg-slate-800 border border-borderCol hover:border-brand rounded-lg p-3 transition text-left">
+          <div class="text-xs font-bold text-white truncate">${m.title}</div>
+          <div class="text-[10px] text-brand font-medium mt-0.5">${m.tag}</div>
+          <div class="text-[10px] text-slate-400 mt-2 font-mono"><i class="fa-regular fa-calendar mr-1"></i>${m.release_date}</div>
+        </div>
+      `).join('');
+    }
+
+    function selectPreReleaseMovie(title, code, slug) {
+      document.getElementById('movieTitle').value = title;
+      document.getElementById('eventCode').value = code;
+      showToast(`Selected "${title}"! Fill in your dates and email.`);
+    }
+
+    function addDatesPreset(preset) {
+      const field = document.getElementById('watchDates');
+      if (preset === 'dec_doomsday') {
+        field.value = '20261217, 20261218, 20261219, 20261220, 20261221';
+      } else if (preset === 'this_weekend') {
+        const today = new Date();
+        const d1 = new Date(today); d1.setDate(today.getDate() + 1);
+        const d2 = new Date(today); d2.setDate(today.getDate() + 2);
+        const fmt = d => d.toISOString().slice(0, 10).replace(/-/g, '');
+        field.value = `${fmt(today)}, ${fmt(d1)}, ${fmt(d2)}`;
+      }
+    }
+
+    async function loadWatches() {
+      const res = await fetch('/api/watches');
+      const watches = await res.json();
+      document.getElementById('watchCountBadge').innerText = watches.length;
+      const list = document.getElementById('watchesList');
+
+      if (!watches.length) {
+        list.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs">No active watches. Create one above!</div>`;
+        return;
+      }
+
+      list.innerHTML = watches.map(w => {
+        const activeClass = w.is_active ? 'bg-accentGreen/10 text-accentGreen border-accentGreen/30' : 'bg-slate-800 text-slate-400 border-slate-700';
+        const activeLabel = w.is_active ? 'ACTIVE' : 'PAUSED';
+        const primeBadge = w.prime_seats_only ? `<span class="bg-accentGold/20 text-accentGold border border-accentGold/40 px-1.5 py-0.5 rounded text-[10px]"><i class="fa-solid fa-crown mr-1"></i>Prime Seats</span>` : '';
+        const formatsBadges = w.formats.map(f => `<span class="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded text-[10px]">${f}</span>`).join(' ');
+
+        return `
+        <div class="p-3.5 rounded-lg bg-slate-900 border border-borderCol hover:border-slate-700 transition">
+          <div class="flex items-start justify-between">
+            <div>
+              <div class="font-bold text-sm text-white flex items-center space-x-2">
+                <span>${w.movie_title}</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border ${activeClass}">${activeLabel}</span>
+              </div>
+              <div class="text-xs text-slate-400 mt-0.5">
+                ${w.region_slug.toUpperCase()} &middot; ${w.dates.length} date(s) watched
+              </div>
+            </div>
+            <div class="flex items-center space-x-1">
+              <button onclick="toggleWatch(${w.id})" title="Toggle Active/Pause" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                <i class="fa-solid ${w.is_active ? 'fa-pause' : 'fa-play'} text-xs"></i>
+              </button>
+              <button onclick="deleteWatch(${w.id})" title="Delete Watch" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-red-400 transition">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-2.5 flex flex-wrap gap-1.5 items-center">
+            ${primeBadge}
+            ${formatsBadges}
+            <span class="text-[10px] text-slate-500 font-mono"><i class="fa-regular fa-envelope mr-1"></i>${w.email}</span>
+          </div>
+        </div>
+        `;
+      }).join('');
+    }
+
+    async function handleCreateWatch(e) {
+      e.preventDefault();
+      const regionEl = document.getElementById('regionSelect');
+      const regionCode = regionEl.value;
+      const regionSlug = regionEl.selectedOptions[0].getAttribute('data-slug');
+      const datesRaw = document.getElementById('watchDates').value;
+      const dates = datesRaw.split(',').map(s => s.trim().replace(/-/g, '')).filter(Boolean);
+      const cinemasRaw = document.getElementById('cinemaFilter').value;
+      const cinemas = cinemasRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+      const payload = {
+        movie_title: document.getElementById('movieTitle').value,
+        event_code: document.getElementById('eventCode').value,
+        region_code: regionCode,
+        region_slug: regionSlug,
+        dates: dates,
+        cinemas: cinemas,
+        formats: Array.from(selectedFormats),
+        prime_seats_only: document.getElementById('primeSeatsToggle').checked,
+        min_seats_together: parseInt(document.getElementById('minSeats').value),
+        email: document.getElementById('userEmail').value
+      };
+
+      try {
+        const res = await fetch('/api/watches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          showToast('Watch created successfully!');
+          await loadWatches();
+        } else {
+          const err = await res.json();
+          showToast(err.error || 'Failed to create watch', true);
+        }
+      } catch (err) {
+        showToast('Network error creating watch', true);
+      }
+    }
+
+    async function toggleWatch(id) {
+      await fetch(`/api/watches/${id}/toggle`, { method: 'POST' });
+      await loadWatches();
+    }
+
+    async function deleteWatch(id) {
+      if (confirm('Delete this movie watch?')) {
+        await fetch(`/api/watches/${id}`, { method: 'DELETE' });
+        await loadWatches();
+      }
+    }
+
+    async function triggerManualCheck() {
+      const icon = document.getElementById('checkIcon');
+      icon.classList.add('fa-spin');
+      try {
+        const res = await fetch('/api/check-now', { method: 'POST' });
+        const data = await res.json();
+        showToast(`Checked ${data.watches_checked} watch(es)! ${data.total_changes} new change(s).`);
+        await loadWatches();
+      } catch (err) {
+        showToast('Check cycle failed', true);
+      } finally {
+        icon.classList.remove('fa-spin');
+      }
+    }
+
+    function showToast(msg, isError = false) {
+      const toast = document.getElementById('toast');
+      const text = document.getElementById('toastMessage');
+      const icon = document.getElementById('toastIcon');
+      text.innerText = msg;
+      icon.className = isError ? 'fa-solid fa-circle-xmark text-red-400' : 'fa-solid fa-circle-check text-accentGreen';
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 3500);
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

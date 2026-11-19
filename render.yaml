@@ -1,0 +1,44 @@
+# BMS Watch on Render's free tier as a single web service.
+# Ephemeral container disk is synced with Supabase Storage S3 bucket
+# (mirror.py), exactly matching openGym and food-tracker.
+services:
+  - type: web
+    name: bms-watch
+    runtime: docker
+    plan: free
+    region: singapore # next to the Supabase project (ap-southeast-1)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: ORIGIN
+        value: https://bms-watch.onrender.com
+      - key: DATA_DIR
+        value: /data
+      - key: POLL_INTERVAL
+        value: "180"
+      # Supabase Storage in the shared project and private `default` bucket,
+      # isolated inside its own folder (MIRROR_PREFIX: bms_watch/)
+      - key: MIRROR_ENDPOINT
+        value: https://ismyhkcsxrswqsfzfrxe.storage.supabase.co/storage/v1/s3
+      - key: MIRROR_BUCKET
+        value: default
+      - key: MIRROR_PREFIX
+        value: bms_watch/
+      - key: MIRROR_REGION
+        value: ap-southeast-1
+      - key: MIRROR_KEY_ID
+        sync: false
+      - key: MIRROR_SECRET
+        sync: false
+      # Email SMTP settings (entered in Render dashboard)
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
