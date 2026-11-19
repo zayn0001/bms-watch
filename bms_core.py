@@ -80,6 +80,7 @@ def init_db():
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS watches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,                  -- Supabase user ID UUID
             movie_title TEXT NOT NULL,
             event_code TEXT NOT NULL,
             movie_slug TEXT NOT NULL,
@@ -114,6 +115,11 @@ def init_db():
             FOREIGN KEY(watch_id) REFERENCES watches(id) ON DELETE CASCADE
         );
         """)
+        # Safe migration for existing DB
+        try:
+            conn.execute("ALTER TABLE watches ADD COLUMN user_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
         # Seed default watch from bms_watch.py if database is fresh
         cur = conn.cursor()
         cur.execute("SELECT count(*) FROM watches")

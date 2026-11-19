@@ -84,6 +84,13 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         if path == "/api/health":
             return self._json(200, {"status": "ok", "app": "bms-watch"})
 
+        # Supabase Auth Config (shared with evenly)
+        if path == "/api/config":
+            return self._json(200, {
+                "supabase_url": os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.co"),
+                "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", ""))
+            })
+
         # HTTP Cron endpoint (for external free crons or keep-alive pings)
         if path == "/api/cron":
             res = run_check_cycle()
@@ -99,10 +106,21 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         if path == "/api/pre-release":
             return self._json(200, UPCOMING_MOVIES)
 
-        # Watches list
+        # Watches list (filtered by user if user_id or email query param provided)
         if path == "/api/watches":
+            qs = urllib.parse.parse_qs(url.query)
+            user_id = qs.get("user_id", [None])[0]
+            email_filter = qs.get("email", [None])[0]
+
             with get_db() as conn:
-                watches = [dict(row) for row in conn.execute("SELECT * FROM watches ORDER BY id DESC").fetchall()]
+                if user_id:
+                    rows = conn.execute("SELECT * FROM watches WHERE user_id = ? ORDER BY id DESC", (user_id,)).fetchall()
+                elif email_filter:
+                    rows = conn.execute("SELECT * FROM watches WHERE email = ? ORDER BY id DESC", (email_filter,)).fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM watches ORDER BY id DESC").fetchall()
+
+                watches = [dict(row) for row in rows]
                 for w in watches:
                     w["dates"] = json.loads(w.get("dates") or "[]")
                     w["cinemas"] = json.loads(w.get("cinemas") or "[]")
@@ -156,6 +174,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             prime_seats = 1 if payload.get("prime_seats_only") else 0
             min_seats = int(payload.get("min_seats_together", 2))
             email = payload.get("email", "").strip()
+            user_id = payload.get("user_id")
 
             if not event_code:
                 return self._json(400, {"error": "event_code is required (e.g. ET00526306)"})
@@ -170,12 +189,12 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                 cur = conn.cursor()
                 cur.execute("""
                 INSERT INTO watches (
-                    movie_title, event_code, movie_slug, region_code, region_slug,
+                    user_id, movie_title, event_code, movie_slug, region_code, region_slug,
                     language, dates, cinemas, formats, prime_seats_only, min_seats_together,
                     email, is_active, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'english', ?, ?, ?, ?, ?, ?, 1, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'english', ?, ?, ?, ?, ?, ?, 1, ?)
                 """, (
-                    title, event_code, slug, region_code, region_slug,
+                    user_id, title, event_code, slug, region_code, region_slug,
                     json.dumps(dates), json.dumps(cinemas), json.dumps(formats),
                     prime_seats, min_seats, email, now
                 ))

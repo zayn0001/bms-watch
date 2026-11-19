@@ -19,6 +19,11 @@ services:
         value: /data
       - key: POLL_INTERVAL
         value: "180"
+      # Supabase Auth & User Database (Shared with evenly)
+      - key: SUPABASE_URL
+        value: https://ismyhkcsxrswqsfzfrxe.supabase.co
+      - key: SUPABASE_ANON_KEY
+        sync: false
       # Supabase Storage in the shared project and private `default` bucket,
       # isolated inside its own folder (MIRROR_PREFIX: bms_watch/)
       - key: MIRROR_ENDPOINT

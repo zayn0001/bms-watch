@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BMS Watch — Movie Ticket & Prime Seating Tracker</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -51,8 +52,15 @@
       <div class="flex items-center space-x-3">
         <button id="btnCheckNow" onclick="triggerManualCheck()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition flex items-center space-x-1.5">
           <i class="fa-solid fa-rotate" id="checkIcon"></i>
-          <span>Check Availability Now</span>
+          <span class="hidden sm:inline">Check Availability Now</span>
         </button>
+        <!-- Account Status (Matching evenly's Topbar) -->
+        <div id="authNavArea">
+          <button onclick="openAuthModal('sign-in')" class="px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brandHover text-xs font-bold text-white shadow-lg shadow-brand/20 transition flex items-center space-x-1.5">
+            <i class="fa-solid fa-user"></i>
+            <span>Sign In / OTP</span>
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -165,7 +173,7 @@
               <i class="fa-regular fa-envelope absolute left-3 top-3 text-slate-500 text-sm"></i>
               <input type="email" id="userEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-borderCol rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
             </div>
-            <p class="text-[11px] text-slate-500 mt-1">Alerts include direct BookMyShow booking deep links.</p>
+            <p id="emailHint" class="text-[11px] text-slate-500 mt-1">Sign in with OTP above to sync watches with your Evenly account.</p>
           </div>
 
           <button type="submit" class="w-full py-2.5 rounded-lg bg-brand hover:bg-brandHover text-white font-bold text-sm shadow-lg shadow-brand/20 transition flex items-center justify-center space-x-2">
@@ -250,6 +258,85 @@
 
   </main>
 
+  <!-- ========================================================================= -->
+  <!-- Supabase Auth Modal (Replicating evenly's OTP & Account System) -->
+  <!-- ========================================================================= -->
+  <div id="authModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm hidden">
+    <div class="bg-cardBg border border-borderCol rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+      <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <!-- Modal Header -->
+      <div class="mb-5">
+        <span id="authBadge" class="text-[10px] font-mono tracking-wider uppercase font-bold text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded">SIGN IN</span>
+        <h3 id="authTitle" class="text-xl font-bold text-white mt-1">Evenly &middot; BMS Watch</h3>
+        <p id="authSubtitle" class="text-xs text-slate-400 mt-1">Shared account login with 6-digit email verification.</p>
+      </div>
+
+      <!-- Notice Alert -->
+      <div id="authNotice" class="hidden mb-4 p-3 rounded-lg text-xs leading-relaxed"></div>
+
+      <!-- Auth Form -->
+      <form id="authForm" onsubmit="handleAuthSubmit(event)" class="space-y-4">
+        
+        <!-- Name (Sign-up only) -->
+        <div id="authNameField" class="hidden">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Your Name</label>
+          <input type="text" id="authName" placeholder="How you want to be called" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+        </div>
+
+        <!-- Email (All modes) -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Email</label>
+          <input type="email" id="authEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+        </div>
+
+        <!-- 6-Digit OTP Code (Verify & Reset modes) -->
+        <div id="authCodeField" class="hidden">
+          <label class="block text-xs font-semibold text-accentGold mb-1">6-Digit Code from Email</label>
+          <input type="text" id="authCode" inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10" placeholder="000000" class="w-full bg-slate-900 border border-accentGold/60 rounded-lg px-3 py-2 text-center text-lg font-mono tracking-[0.4em] font-bold text-white focus:outline-none focus:border-accentGold">
+          <p class="text-[11px] text-slate-400 mt-1">Check your inbox and spam folder for the code.</p>
+        </div>
+
+        <!-- Password (Sign-in, Sign-up, Reset) -->
+        <div id="authPasswordField">
+          <label id="authPasswordLabel" class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+          <input type="password" id="authPassword" minlength="8" placeholder="••••••••" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+          <span id="authPasswordHint" class="text-[11px] text-slate-500 mt-1 block">At least 8 characters.</span>
+        </div>
+
+        <button type="submit" id="authSubmitBtn" class="w-full py-2.5 rounded-lg bg-brand hover:bg-brandHover text-white font-bold text-sm shadow-lg shadow-brand/20 transition flex items-center justify-center space-x-2">
+          <span id="authBtnText">Sign In</span>
+        </button>
+      </form>
+
+      <!-- Resend Code Button (Verify / Reset modes) -->
+      <button id="authResendBtn" type="button" onclick="handleResendCode()" class="hidden w-full mt-2 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition">
+        Send a new code
+      </button>
+
+      <hr class="border-borderCol my-4">
+
+      <!-- Navigation Mode Switches (Matching evenly) -->
+      <div id="authNavButtons" class="space-y-1.5 text-center text-xs">
+        <button type="button" id="btnGoOtpDirect" onclick="switchAuthMode('otp-direct')" class="text-brand hover:underline block w-full py-1">
+          <i class="fa-solid fa-envelope-open-text mr-1"></i> Sign in with 6-digit email code (Passwordless OTP)
+        </button>
+        <button type="button" id="btnGoSignUp" onclick="switchAuthMode('sign-up')" class="text-slate-400 hover:text-white block w-full py-1">
+          New here? Create an account
+        </button>
+        <button type="button" id="btnGoForgot" onclick="switchAuthMode('forgot')" class="text-slate-400 hover:text-white block w-full py-1">
+          Forgot your password?
+        </button>
+        <button type="button" id="btnGoSignIn" onclick="switchAuthMode('sign-in')" class="hidden text-brand hover:underline block w-full py-1 font-semibold">
+          Back to sign in
+        </button>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 border border-slate-700 text-white text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-2">
     <i class="fa-solid fa-circle-check text-accentGreen" id="toastIcon"></i>
@@ -257,16 +344,314 @@
   </div>
 
   <script>
+    let supabaseClient = null;
+    let currentSession = null;
     let selectedFormats = new Set();
     let regionsList = [];
+    
+    // Auth state machine: 'sign-in' | 'sign-up' | 'verify' | 'forgot' | 'reset' | 'otp-direct'
+    let authMode = 'sign-in';
+    let authCooldown = 0;
+    let cooldownTimer = null;
 
     async function init() {
+      await initSupabase();
       await loadRegions();
       await loadFormats();
       await loadPreRelease();
       await loadWatches();
     }
 
+    // -------------------------------------------------------------------------
+    // Supabase Initialization & Auth Listener (Matching evenly)
+    // -------------------------------------------------------------------------
+    async function initSupabase() {
+      try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        const url = cfg.supabase_url || 'https://ismyhkcsxrswqsfzfrxe.supabase.co';
+        const key = cfg.supabase_anon_key || '';
+        
+        if (window.supabase && url && key) {
+          supabaseClient = window.supabase.createClient(url, key);
+          
+          // Check active session
+          const { data } = await supabaseClient.auth.getSession();
+          setAuthSession(data.session);
+
+          // Listen for auth changes
+          supabaseClient.auth.onAuthStateChange((_event, session) => {
+            setAuthSession(session);
+          });
+        }
+      } catch (err) {
+        console.warn('Supabase initialization fallback:', err);
+      }
+    }
+
+    function setAuthSession(session) {
+      currentSession = session;
+      const nav = document.getElementById('authNavArea');
+      const emailInput = document.getElementById('userEmail');
+      const emailHint = document.getElementById('emailHint');
+
+      if (session && session.user) {
+        const email = session.user.email;
+        const name = session.user.user_metadata?.name || email.split('@')[0];
+        nav.innerHTML = `
+          <div class="flex items-center space-x-2">
+            <span class="text-xs text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded font-mono truncate max-w-[140px]" title="${email}">
+              <i class="fa-solid fa-user-check text-accentGreen mr-1"></i>${name}
+            </span>
+            <button onclick="handleSignOut()" class="text-xs text-slate-400 hover:text-white px-2 py-1 transition">
+              Sign out
+            </button>
+          </div>
+        `;
+        emailInput.value = email;
+        emailInput.readOnly = true;
+        emailInput.classList.add('opacity-80', 'cursor-not-allowed');
+        emailHint.innerHTML = `<span class="text-accentGreen"><i class="fa-solid fa-circle-check mr-1"></i>Linked to your Evenly/Supabase account (${email})</span>`;
+      } else {
+        nav.innerHTML = `
+          <button onclick="openAuthModal('sign-in')" class="px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brandHover text-xs font-bold text-white shadow-lg shadow-brand/20 transition flex items-center space-x-1.5">
+            <i class="fa-solid fa-user"></i>
+            <span>Sign In / OTP</span>
+          </button>
+        `;
+        emailInput.readOnly = false;
+        emailInput.classList.remove('opacity-80', 'cursor-not-allowed');
+        emailHint.innerText = 'Sign in with OTP above to sync watches with your Evenly account.';
+      }
+      loadWatches();
+    }
+
+    async function handleSignOut() {
+      if (supabaseClient) {
+        await supabaseClient.auth.signOut();
+        showToast('Signed out successfully');
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Auth Modal State Transitions (Exactly matching evenly)
+    // -------------------------------------------------------------------------
+    function openAuthModal(mode = 'sign-in') {
+      document.getElementById('authModal').classList.remove('hidden');
+      switchAuthMode(mode);
+    }
+
+    function closeAuthModal() {
+      document.getElementById('authModal').classList.add('hidden');
+    }
+
+    function switchAuthMode(mode, message = null) {
+      authMode = mode;
+      const title = document.getElementById('authTitle');
+      const badge = document.getElementById('authBadge');
+      const subtitle = document.getElementById('authSubtitle');
+      const btnText = document.getElementById('authBtnText');
+      const nameField = document.getElementById('authNameField');
+      const codeField = document.getElementById('authCodeField');
+      const passwordField = document.getElementById('authPasswordField');
+      const passwordLabel = document.getElementById('authPasswordLabel');
+      const resendBtn = document.getElementById('authResendBtn');
+      const emailInput = document.getElementById('authEmail');
+
+      const btnGoOtpDirect = document.getElementById('btnGoOtpDirect');
+      const btnGoSignUp = document.getElementById('btnGoSignUp');
+      const btnGoForgot = document.getElementById('btnGoForgot');
+      const btnGoSignIn = document.getElementById('btnGoSignIn');
+
+      // Reset notices
+      setAuthNotice(message, false);
+
+      const needsCode = mode === 'verify' || mode === 'reset';
+      const needsPassword = mode === 'sign-in' || mode === 'sign-up' || mode === 'reset';
+
+      emailInput.readOnly = needsCode;
+      nameField.classList.toggle('hidden', mode !== 'sign-up');
+      codeField.classList.toggle('hidden', !needsCode);
+      passwordField.classList.toggle('hidden', !needsPassword);
+      resendBtn.classList.toggle('hidden', !needsCode);
+
+      // Mode toggles in footer
+      btnGoSignIn.classList.toggle('hidden', mode === 'sign-in');
+      btnGoSignUp.classList.toggle('hidden', mode === 'sign-up' || needsCode);
+      btnGoForgot.classList.toggle('hidden', mode !== 'sign-in');
+      btnGoOtpDirect.classList.toggle('hidden', mode !== 'sign-in');
+
+      if (mode === 'sign-in') {
+        badge.innerText = 'SIGN IN';
+        title.innerText = 'Sign in to BMS Watch';
+        subtitle.innerText = 'Use your shared Evenly / Supabase account.';
+        btnText.innerText = 'Sign In';
+      } else if (mode === 'sign-up') {
+        badge.innerText = 'SIGN UP';
+        title.innerText = 'Create an account';
+        subtitle.innerText = 'A 6-digit confirmation code will be emailed to you.';
+        btnText.innerText = 'Create account';
+      } else if (mode === 'verify') {
+        badge.innerText = 'OTP VERIFICATION';
+        title.innerText = 'Check your email';
+        subtitle.innerText = `Enter the 6-digit verification code sent to ${emailInput.value}.`;
+        btnText.innerText = 'Confirm Code';
+        startCooldown(60);
+      } else if (mode === 'forgot') {
+        badge.innerText = 'PASSWORD RESET';
+        title.innerText = 'Reset your password';
+        subtitle.innerText = 'We will email you a 6-digit recovery code.';
+        btnText.innerText = 'Email me a code';
+      } else if (mode === 'reset') {
+        badge.innerText = 'SET NEW PASSWORD';
+        title.innerText = 'Enter code & new password';
+        subtitle.innerText = 'Enter the recovery code sent to your email.';
+        passwordLabel.innerText = 'New Password';
+        btnText.innerText = 'Save new password';
+      } else if (mode === 'otp-direct') {
+        badge.innerText = 'PASSWORDLESS OTP';
+        title.innerText = 'Sign in with Email Code';
+        subtitle.innerText = 'No password needed! We will email you a one-time 6-digit code.';
+        passwordField.classList.add('hidden');
+        btnText.innerText = 'Send Sign-in Code';
+      }
+    }
+
+    function setAuthNotice(msg, isError = false) {
+      const el = document.getElementById('authNotice');
+      if (!msg) {
+        el.classList.add('hidden');
+        return;
+      }
+      el.classList.remove('hidden', 'bg-red-950/70', 'border-red-800', 'text-red-300', 'bg-emerald-950/70', 'border-emerald-800', 'text-emerald-300');
+      if (isError) {
+        el.classList.add('bg-red-950/70', 'border', 'border-red-800', 'text-red-300');
+        el.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1.5"></i>${msg}`;
+      } else {
+        el.classList.add('bg-emerald-950/70', 'border', 'border-emerald-800', 'text-emerald-300');
+        el.innerHTML = `<i class="fa-solid fa-circle-info mr-1.5"></i>${msg}`;
+      }
+    }
+
+    function startCooldown(sec) {
+      authCooldown = sec;
+      const btn = document.getElementById('authResendBtn');
+      if (cooldownTimer) clearInterval(cooldownTimer);
+      btn.disabled = true;
+      btn.innerText = `Send a new code (in ${authCooldown}s)`;
+      cooldownTimer = setInterval(() => {
+        authCooldown--;
+        if (authCooldown <= 0) {
+          clearInterval(cooldownTimer);
+          btn.disabled = false;
+          btn.innerText = 'Send a new code';
+        } else {
+          btn.innerText = `Send a new code (in ${authCooldown}s)`;
+        }
+      }, 1000);
+    }
+
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      if (!supabaseClient) {
+        setAuthNotice('Supabase client not configured. Add SUPABASE_ANON_KEY to .env', true);
+        return;
+      }
+
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      const name = document.getElementById('authName').value.trim();
+      const code = document.getElementById('authCode').value.trim();
+      const submitBtn = document.getElementById('authSubmitBtn');
+
+      submitBtn.disabled = true;
+      submitBtn.classList.add('opacity-50');
+
+      try {
+        if (authMode === 'sign-in') {
+          const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (error) {
+            if (error.code === 'email_not_confirmed' || error.message.includes('not confirmed')) {
+              switchAuthMode('verify', `Confirm your email first: enter the 6-digit code sent to ${email}`);
+              return;
+            }
+            throw error;
+          }
+          closeAuthModal();
+          showToast(`Welcome back, ${email}!`);
+        } else if (authMode === 'sign-up') {
+          // Exactly matching evenly's sign-up with app tag
+          const { data, error } = await supabaseClient.auth.signUp({
+            email,
+            password,
+            options: { data: { app: 'bms_watch', name: name } }
+          });
+          if (error) throw error;
+          if (!data.session) {
+            switchAuthMode('verify', `We sent a 6-digit code to ${email}.`);
+          } else {
+            closeAuthModal();
+            showToast('Account created!');
+          }
+        } else if (authMode === 'verify') {
+          // Exactly matching evenly: verifyOtp with type 'signup' or fallback 'email'
+          let res = await supabaseClient.auth.verifyOtp({ email, token: code, type: 'signup' });
+          if (res.error) {
+            res = await supabaseClient.auth.verifyOtp({ email, token: code, type: 'email' });
+          }
+          if (res.error) throw res.error;
+          closeAuthModal();
+          showToast('Email confirmed & signed in!');
+        } else if (authMode === 'otp-direct') {
+          // Passwordless email OTP
+          const { error } = await supabaseClient.auth.signInWithOtp({
+            email,
+            options: { data: { app: 'bms_watch' } }
+          });
+          if (error) throw error;
+          switchAuthMode('verify', `A one-time 6-digit code has been sent to ${email}.`);
+        } else if (authMode === 'forgot') {
+          const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+          if (error) throw error;
+          switchAuthMode('reset', `If ${email} has an account, a 6-digit code is on its way.`);
+        } else if (authMode === 'reset') {
+          const { error: otpError } = await supabaseClient.auth.verifyOtp({ email, token: code, type: 'recovery' });
+          if (otpError) throw otpError;
+          const { error: pwError } = await supabaseClient.auth.updateUser({ password });
+          if (pwError) throw pwError;
+          closeAuthModal();
+          showToast('New password saved!');
+        }
+      } catch (err) {
+        setAuthNotice(err.message || 'Authentication failed', true);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50');
+      }
+    }
+
+    async function handleResendCode() {
+      const email = document.getElementById('authEmail').value.trim();
+      try {
+        let error = null;
+        if (authMode === 'verify') {
+          const res = await supabaseClient.auth.resend({ type: 'signup', email });
+          error = res.error;
+        } else {
+          const res = await supabaseClient.auth.resetPasswordForEmail(email);
+          error = res.error;
+        }
+        if (error) throw error;
+        setAuthNotice(`A fresh 6-digit code was sent to ${email}.`, false);
+        startCooldown(60);
+      } catch (err) {
+        setAuthNotice(err.message || 'Failed to resend code', true);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Standard App Data & Watches
+    // -------------------------------------------------------------------------
     async function loadRegions() {
       const res = await fetch('/api/regions');
       regionsList = await res.json();
@@ -313,7 +698,7 @@
     function selectPreReleaseMovie(title, code, slug) {
       document.getElementById('movieTitle').value = title;
       document.getElementById('eventCode').value = code;
-      showToast(`Selected "${title}"! Fill in your dates and email.`);
+      showToast(`Selected "${title}"!`);
     }
 
     function addDatesPreset(preset) {
@@ -330,7 +715,12 @@
     }
 
     async function loadWatches() {
-      const res = await fetch('/api/watches');
+      let url = '/api/watches';
+      if (currentSession && currentSession.user) {
+        url += `?email=${encodeURIComponent(currentSession.user.email)}&user_id=${encodeURIComponent(currentSession.user.id)}`;
+      }
+
+      const res = await fetch(url);
       const watches = await res.json();
       document.getElementById('watchCountBadge').innerText = watches.length;
       const list = document.getElementById('watchesList');
@@ -398,7 +788,8 @@
         formats: Array.from(selectedFormats),
         prime_seats_only: document.getElementById('primeSeatsToggle').checked,
         min_seats_together: parseInt(document.getElementById('minSeats').value),
-        email: document.getElementById('userEmail').value
+        email: document.getElementById('userEmail').value,
+        user_id: currentSession?.user?.id || null
       };
 
       try {
