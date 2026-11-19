@@ -499,12 +499,22 @@
     function populateFilmSelect() {
       const sel = $('fFilm'), keep = sel.value;
       const group = (label, list) => {
-        const opts = list.filter(m => m.event_code).map(m => `<option value="${esc(m.event_code)}">${esc(m.name)}</option>`).join('');
+        const opts = list.filter(m => m.event_code).map(m => {
+          const lang = m.language ? ` [${m.language.toUpperCase()}]` : '';
+          return `<option value="${esc(m.event_code)}">${esc(m.name)}${lang}</option>`;
+        }).join('');
         return opts ? `<optgroup label="${label}">${opts}</optgroup>` : '';
       };
-      sel.innerHTML = `<option value="">Choose a film</option>` + group('In cinemas', movieCache.movies) + group('Coming soon', movieCache.upcoming);
-      if (keep && filmByCode(keep)) { sel.value = keep; if (infoKey !== keep + currentCity.code) onFilmChange(); }
-      else if (keep) onFilmChange();   // city changed and the film isn't showing here
+      const newHtml = `<option value="">Choose a film</option>` + group('In cinemas', movieCache.movies) + group('Coming soon', movieCache.upcoming);
+      if (sel.innerHTML !== newHtml) {
+        sel.innerHTML = newHtml;
+        if (keep && filmByCode(keep)) {
+          sel.value = keep;
+          if (infoKey !== keep + currentCity.code) onFilmChange();
+        } else if (keep) {
+          onFilmChange();   // city changed and the film isn't showing here
+        }
+      }
     }
 
     async function onFilmChange() {
@@ -515,7 +525,13 @@
       if (!m) return;
       $('dateNote').textContent = 'Checking BookMyShow for dates…';
       $('cinemaNote').textContent = 'Checking BookMyShow for showtimes…';
-      const q = new URLSearchParams({ event: m.event_code, region: currentCity.code, slug: currentCity.slug, movie_slug: m.slug || '' });
+      const q = new URLSearchParams({
+        event: m.event_code,
+        region: currentCity.code,
+        slug: currentCity.slug,
+        movie_slug: m.slug || '',
+        language: m.language || ''
+      });
       try {
         const res = await fetch(`/api/bms/movie-info?${q}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -704,6 +720,7 @@
         movie_title: film.name,
         event_code: film.event_code,
         movie_slug: film.slug || undefined,
+        language: movieInfo?.language || film.language || 'english',
         region_code: currentCity.code,
         region_slug: currentCity.slug,
         dates: [...selectedDates].sort(),

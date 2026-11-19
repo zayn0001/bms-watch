@@ -107,8 +107,9 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             region = qs.get("region", ["COIM"])[0].upper()
             slug = qs.get("slug", ["coimbatore"])[0].lower()
             movie_slug = qs.get("movie_slug", [""])[0].lower()
+            language = qs.get("language", [""])[0].lower()
             try:
-                info = get_movie_info(event, region, slug, movie_slug)
+                info = get_movie_info(event, region, slug, movie_slug, language=language)
                 return self._json(200, info)
             except Exception:
                 log.exception("movie-info failed for %s", event)
@@ -201,6 +202,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             dates = payload.get("dates") or []
             cinemas = payload.get("cinemas") or []
             formats = payload.get("formats") or []
+            language = (payload.get("language") or "english").strip().lower()
             email = payload.get("email", "").strip()
             user_id = payload.get("user_id")
 
@@ -227,10 +229,10 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                     user_id, movie_title, event_code, movie_slug, region_code, region_slug,
                     language, dates, cinemas, formats,
                     email, is_active, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'english', ?, ?, ?, ?, 1, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """, (
                     user_id, title, event_code, slug, region_code, region_slug,
-                    json.dumps(dates), json.dumps(cinemas), json.dumps(formats),
+                    language, json.dumps(dates), json.dumps(cinemas), json.dumps(formats),
                     email, now
                 ))
                 new_id = cur.lastrowid

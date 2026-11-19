@@ -78,6 +78,21 @@ POPULAR_FORMATS = ["IMAX 3D", "IMAX 2D", "EPIQ", "PXL", "ICE", "4DX", "ScreenX",
 # Common names BMS's own alias data leaves out (it already has bombay, madras, cochin, mysore...)
 EXTRA_CITY_ALIASES = {"BANG": ["bangalore"], "KOLK": ["calcutta"], "PUNE": ["poona"], "COIM": ["kovai"]}
 
+REGION_LANGUAGES = {
+    "COIM": ["tamil", "english", "hindi"],
+    "CHEN": ["tamil", "english", "hindi"],
+    "BANG": ["kannada", "english", "hindi", "tamil", "telugu"],
+    "MUMBAI": ["hindi", "marathi", "english"],
+    "NCR": ["hindi", "english", "punjabi"],
+    "HYD": ["telugu", "english", "hindi"],
+    "KOCH": ["malayalam", "english", "tamil", "hindi"],
+    "TRIV": ["malayalam", "english", "tamil", "hindi"],
+    "PUNE": ["marathi", "hindi", "english"],
+    "KOLK": ["bengali", "hindi", "english"],
+    "AHD": ["gujarati", "hindi", "english"],
+    "CHAN": ["hindi", "punjabi", "english"],
+}
+
 log = logging.getLogger("bms_watch.core")
 
 _CACHE_REGIONS = None
@@ -151,6 +166,22 @@ def get_bms_movies(region_code: str = "COIM", region_slug: str = "coimbatore", e
                 if m and m.group(2) not in seen:
                     seen.add(m.group(2))
                     texts = [c.get("text", "") for t in o.get("text", []) for c in t.get("components", []) if c.get("type") == "text"]
+                    card_analytics = o.get("analytics") or {}
+                    card_lang = card_analytics.get("language", "").strip().lower()
+                    m_langs = []
+                    if card_lang:
+                        m_langs.append(card_lang)
+                    if len(texts) > 1:
+                        sub_langs = re.findall(
+                            r"(tamil|telugu|hindi|malayalam|kannada|english|bengali|marathi|gujarati|punjabi|japanese)",
+                            texts[1],
+                            re.IGNORECASE,
+                        )
+                        for sl in sub_langs:
+                            sl = sl.lower()
+                            if sl not in m_langs:
+                                m_langs.append(sl)
+
                     movies.append({
                         "name": texts[0] if texts else (o.get("image") or {}).get("altText", ""),
                         "subtitle": " · ".join(t.strip() for t in texts[1:] if t.strip()),
@@ -159,6 +190,8 @@ def get_bms_movies(region_code: str = "COIM", region_slug: str = "coimbatore", e
                         "event_code": m.group(2),
                         "slug": m.group(1),
                         "type": explore_type,
+                        "language": m_langs[0] if m_langs else "",
+                        "languages": m_langs,
                     })
                     return
                 for v in o.values():
@@ -359,20 +392,51 @@ def get_city_venues(region_code: str, region_slug: str = "") -> list[str]:
     return []
 
 
-def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_slug: str) -> dict:
+def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_slug: str, language: str = "") -> dict:
     """What the watch form needs: earliest watchable date, already-bookable dates, and cinemas."""
     today = today_ist()
     raw = {}
     dates = []
     movie_venues = []
-    try:
-        raw = fetch_bms_showtimes(event_code, today, region_code, region_slug)
-        dates = [d for d in bookable_dates(raw) if d >= today]
-        if dates:
-            parsed = parse_bms_showtimes(raw)
-            movie_venues = sorted(v for v in parsed if isinstance(v, str) and v.strip())
-    except Exception:
-        log.warning("Could not fetch showtimes for %s (%s)", event_code, region_code)
+
+    # Build ordered list of candidate languages to test
+    candidates = []
+    if language and language.strip():
+        candidates.append(language.strip().lower())
+    for r_lang in REGION_LANGUAGES.get(region_code, ["english", "hindi", "tamil"]):
+        if r_lang not in candidates:
+            candidates.append(r_lang)
+    for default_lang in ["english", "hindi", "tamil"]:
+        if default_lang not in candidates:
+            candidates.append(default_lang)
+
+    chosen_lang = candidates[0]
+    for lang in candidates:
+        try:
+            r = fetch_bms_showtimes(event_code, today, region_code, region_slug, language=lang)
+            d = [x for x in bookable_dates(r) if x >= today]
+            if d:
+                raw = r
+                chosen_lang = lang
+                dates = d
+                break
+            if not raw:
+                raw = r
+                chosen_lang = lang
+        except Exception:
+            continue
+
+    if dates:
+        parsed = parse_bms_showtimes(raw)
+        movie_venues = sorted(v for v in parsed if isinstance(v, str) and v.strip())
+        # If today has 0 venues (e.g. shows start tomorrow or next week), fetch the earliest bookable date
+        if not movie_venues and dates[0] != today:
+            try:
+                r_first = fetch_bms_showtimes(event_code, dates[0], region_code, region_slug, language=chosen_lang)
+                parsed_first = parse_bms_showtimes(r_first)
+                movie_venues = sorted(v for v in parsed_first if isinstance(v, str) and v.strip())
+            except Exception:
+                pass
 
     city_venues = []
     try:
@@ -398,6 +462,7 @@ def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_sl
         "movie_venues": movie_venues,
         "venues": all_venues or city_venues or movie_venues,
         "venues_source": "movie" if movie_venues else "city",
+        "language": chosen_lang,
     }
 
 
