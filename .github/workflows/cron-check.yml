@@ -1,11 +1,11 @@
 name: BMS Watch Scheduled Check
 
 # Asks the Render app to run a check. The check runs on Render against its own database,
-# so nothing here touches the data. Every 14 minutes also keeps the free Render service
+# so nothing here touches the data. Every 5 minutes (GitHub's shortest) also keeps the free Render service
 # from sleeping (it sleeps after 15 idle minutes).
 on:
   schedule:
-    - cron: '*/14 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch: # Run workflow button in the Actions tab
 
 jobs:
