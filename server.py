@@ -35,7 +35,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
-    def _json(self, status_code: int, data: dict | list):
+    def _json(self, status_code: int, data: dict | list, headers: dict = None):
         payload = json.dumps(data, indent=2).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -43,6 +43,9 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        if headers:
+            for k, v in headers.items():
+                self.send_header(k, v)
         self.end_headers()
         self.wfile.write(payload)
 
@@ -83,10 +86,10 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         if path == "/api/bms/movies":
             qs = urllib.parse.parse_qs(url.query)
             region = qs.get("region", ["COIM"])[0].upper()
-            slug = qs.get("slug", ["coimbatore"])[0].lower()
+            slug = qs.get("slug", [""])[0].lower()
             mtype = qs.get("type", ["movies"])[0].lower()
             movies = get_bms_movies(region, slug, mtype)
-            return self._json(200, movies)
+            return self._json(200, movies, headers={"Cache-Control": "public, max-age=60"})
 
         if path == "/api/formats":
             return self._json(200, POPULAR_FORMATS)

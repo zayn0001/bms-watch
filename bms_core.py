@@ -133,77 +133,18 @@ def get_bms_regions() -> list[dict]:
     return POPULAR_REGIONS
 
 
-def get_bms_movies(region_code: str = "COIM", region_slug: str = "coimbatore", explore_type: str = "movies") -> list[dict]:
-    cache_key = (region_code, explore_type)
-    now = time.time()
-    if cache_key in _CACHE_MOVIES:
-        ts, data = _CACHE_MOVIES[cache_key]
-        if now - ts < 600:
-            return data
-
-    import uuid
-    headers = dict(BMS_HEADERS)
-    headers["x-region-code"] = region_code
-    headers["x-region-slug"] = region_slug
-    headers["x-bms-id"] = str(uuid.uuid4())
-
-    exp = "upcoming-movies" if explore_type in ("upcoming", "upcoming-movies") else "movies"
-    params = urllib.parse.urlencode({"region": region_code})
-    url = f"https://in.bookmyshow.com/api/explore/v1/discover/{exp}-{urllib.parse.quote(region_slug)}?{params}"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=12) as r:
-            d = json.load(r)
-        # Read the listing cards, not meta.ldSchema: that SEO summary is capped at 10 films.
-        movies, seen = [], set()
-
-        def walk(o):
-            if isinstance(o, list):
-                for x in o:
-                    walk(x)
-            elif isinstance(o, dict):
-                m = re.search(r"/movies/[^/]+/([^/]+)/(ET\d+)", str(o.get("ctaUrl", "")))
-                if m and m.group(2) not in seen:
-                    seen.add(m.group(2))
-                    texts = [c.get("text", "") for t in o.get("text", []) for c in t.get("components", []) if c.get("type") == "text"]
-                    card_analytics = o.get("analytics") or {}
-                    card_lang = card_analytics.get("language", "").strip().lower()
-                    m_langs = []
-                    if card_lang:
-                        m_langs.append(card_lang)
-                    if len(texts) > 1:
-                        sub_langs = re.findall(
-                            r"(tamil|telugu|hindi|malayalam|kannada|english|bengali|marathi|gujarati|punjabi|japanese)",
-                            texts[1],
-                            re.IGNORECASE,
-                        )
-                        for sl in sub_langs:
-                            sl = sl.lower()
-                            if sl not in m_langs:
-                                m_langs.append(sl)
-
-                    movies.append({
-                        "name": texts[0] if texts else (o.get("image") or {}).get("altText", ""),
-                        "subtitle": " · ".join(t.strip() for t in texts[1:] if t.strip()),
-                        "image": (o.get("image") or {}).get("url", ""),
-                        "url": o["ctaUrl"],
-                        "event_code": m.group(2),
-                        "slug": m.group(1),
-                        "type": explore_type,
-                        "language": m_langs[0] if m_langs else "",
-                        "languages": m_langs,
-                    })
-                    return
-                for v in o.values():
-                    walk(v)
-
-        walk(d.get("listings", []))
-        if movies:
-            _CACHE_MOVIES[cache_key] = (now, movies)
-            return movies
-    except Exception:
-        log.exception("Failed fetching live BMS movies for %s (%s)", region_code, explore_type)
-    return []
+def resolve_region_slug(region_code: str, fallback_slug: str = "") -> str:
+    if fallback_slug and fallback_slug.strip():
+        return fallback_slug.strip().lower()
+    code = (region_code or "").upper()
+    for r in POPULAR_REGIONS:
+        if r["code"] == code:
+            return r["slug"]
+    if _CACHE_REGIONS:
+        for r in _CACHE_REGIONS:
+            if r.get("code") == code and r.get("slug"):
+                return r["slug"]
+    return code.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +194,14 @@ def init_db():
             created_at TEXT NOT NULL,
             FOREIGN KEY(watch_id) REFERENCES watches(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS bms_movies_cache (
+            region_code TEXT NOT NULL,
+            explore_type TEXT NOT NULL,
+            data TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(region_code, explore_type)
+        );
         """)
         # Safe migration for existing DB
         try:
@@ -265,6 +214,172 @@ def init_db():
                 conn.execute(f"ALTER TABLE watches DROP COLUMN {col}")
             except sqlite3.OperationalError:
                 pass  # already gone
+
+
+def get_cached_movies_from_db(region_code: str, explore_type: str) -> tuple[float, list[dict]] | None:
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "SELECT data, updated_at FROM bms_movies_cache WHERE region_code = ? AND explore_type = ?",
+                (region_code.upper(), explore_type.lower()),
+            )
+            row = cur.fetchone()
+            if row:
+                data = json.loads(row["data"])
+                if isinstance(data, list) and data:
+                    return float(row["updated_at"]), data
+    except Exception:
+        pass
+    return None
+
+
+def save_cached_movies_to_db(region_code: str, explore_type: str, movies: list[dict], updated_at: float):
+    if not movies:
+        return
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO bms_movies_cache (region_code, explore_type, data, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (region_code.upper(), explore_type.lower(), json.dumps(movies), updated_at),
+            )
+            conn.commit()
+    except Exception:
+        log.exception("Failed saving movies cache to DB for %s (%s)", region_code, explore_type)
+
+
+def fetch_live_bms_movies(region_code: str, region_slug: str, explore_type: str) -> list[dict]:
+    import uuid
+    exp = "upcoming-movies" if explore_type in ("upcoming", "upcoming-movies") else "movies"
+    params = urllib.parse.urlencode({"region": region_code})
+
+    # Primary URL includes region_slug, secondary fallback endpoint uses region query only
+    url_candidates = [
+        f"https://in.bookmyshow.com/api/explore/v1/discover/{exp}-{urllib.parse.quote(region_slug)}?{params}",
+        f"https://in.bookmyshow.com/api/explore/v1/discover/{exp}?{params}",
+    ]
+
+    for attempt, url in enumerate(url_candidates):
+        for retry in range(2):
+            try:
+                headers = dict(BMS_HEADERS)
+                headers["x-region-code"] = region_code
+                headers["x-region-slug"] = region_slug
+                headers["x-bms-id"] = str(uuid.uuid4())
+
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=12) as r:
+                    d = json.load(r)
+
+                movies, seen = [], set()
+
+                def walk(o):
+                    if isinstance(o, list):
+                        for x in o:
+                            walk(x)
+                    elif isinstance(o, dict):
+                        cta_url = str(o.get("ctaUrl", ""))
+                        analytics = o.get("analytics") or {}
+                        event_code = analytics.get("event_code") or ""
+                        if not event_code:
+                            m_code = re.search(r"\b(ET\d+)\b", cta_url)
+                            if m_code:
+                                event_code = m_code.group(1)
+
+                        if event_code and event_code not in seen:
+                            seen.add(event_code)
+                            m_slug = re.search(r"/movies/(?:[^/]+/)?([^/?#]+)/(?:ET\d+)", cta_url)
+                            texts = [c.get("text", "") for t in o.get("text", []) for c in t.get("components", []) if c.get("type") == "text"]
+                            card_lang = analytics.get("language", "").strip().lower()
+                            m_langs = []
+                            if card_lang:
+                                m_langs.append(card_lang)
+                            if len(texts) > 1:
+                                sub_langs = re.findall(
+                                    r"(tamil|telugu|hindi|malayalam|kannada|english|bengali|marathi|gujarati|punjabi|japanese)",
+                                    texts[1],
+                                    re.IGNORECASE,
+                                )
+                                for sl in sub_langs:
+                                    sl = sl.lower()
+                                    if sl not in m_langs:
+                                        m_langs.append(sl)
+
+                            raw_name = analytics.get("title") or (texts[0] if texts else (o.get("image") or {}).get("altText", ""))
+                            slug = m_slug.group(1) if m_slug else re.sub(r"[^a-z0-9]+", "-", raw_name.lower()).strip("-")
+
+                            movies.append({
+                                "name": raw_name,
+                                "subtitle": " · ".join(t.strip() for t in texts[1:] if t.strip()),
+                                "image": (o.get("image") or {}).get("url", ""),
+                                "url": cta_url or f"https://in.bookmyshow.com/movies/{region_slug}/{slug}/{event_code}",
+                                "event_code": event_code,
+                                "slug": slug,
+                                "type": explore_type,
+                                "language": m_langs[0] if m_langs else "",
+                                "languages": m_langs,
+                            })
+                            return
+                        for v in o.values():
+                            walk(v)
+
+                walk(d.get("listings", []))
+                if movies:
+                    return movies
+            except Exception as e:
+                log.warning("Attempt %d (retry %d) failed fetching BMS movies for %s (%s) from %s: %s", attempt + 1, retry + 1, region_code, explore_type, url, e)
+                time.sleep(0.4)
+
+    return []
+
+
+def get_bms_movies(region_code: str = "COIM", region_slug: str = "", explore_type: str = "movies") -> list[dict]:
+    region_code = (region_code or "COIM").upper()
+    region_slug = resolve_region_slug(region_code, region_slug)
+    canonical_type = "upcoming" if explore_type in ("upcoming", "upcoming-movies") else "movies"
+    cache_key = (region_code, canonical_type)
+    now = time.time()
+
+    # 1. Fresh in-memory cache check (TTL: 600 seconds / 10 minutes)
+    if cache_key in _CACHE_MOVIES:
+        ts, data = _CACHE_MOVIES[cache_key]
+        if now - ts < 600 and data:
+            return data
+
+    # 2. Fresh SQLite DB cache check (TTL: 600 seconds / 10 minutes)
+    db_cached = get_cached_movies_from_db(region_code, canonical_type)
+    if db_cached:
+        ts, data = db_cached
+        if now - ts < 600 and data:
+            _CACHE_MOVIES[cache_key] = (ts, data)
+            return data
+
+    # 3. Live fetch from BMS with retries and alternate endpoints
+    movies = fetch_live_bms_movies(region_code, region_slug, canonical_type)
+    if movies:
+        _CACHE_MOVIES[cache_key] = (now, movies)
+        save_cached_movies_to_db(region_code, canonical_type, movies, now)
+        return movies
+
+    # 4. Fallback to stale in-memory cache if live fetch failed
+    if cache_key in _CACHE_MOVIES:
+        ts, data = _CACHE_MOVIES[cache_key]
+        if data:
+            log.warning("Serving %d stale in-memory movies for %s (%s) (age: %.1fs)", len(data), region_code, canonical_type, now - ts)
+            return data
+
+    # 5. Fallback to stale SQLite cache if available
+    if db_cached:
+        ts, data = db_cached
+        if data:
+            log.warning("Serving %d stale DB movies for %s (%s) (age: %.1fs)", len(data), region_code, canonical_type, now - ts)
+            _CACHE_MOVIES[cache_key] = (ts, data)
+            return data
+
+    log.error("Could not obtain movies for %s (%s) from live BMS or cache", region_code, canonical_type)
+    return []
 
 
 # ---------------------------------------------------------------------------

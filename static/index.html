@@ -466,17 +466,18 @@
       { timeout: 10000, maximumAge: 3600000 });
     }
 
-    async function fetchMovies(type) {
+    async function fetchMovies(type, force = false) {
       const grid = $(type === 'upcoming' ? 'grid-upcoming' : 'grid-movies');
-      grid.innerHTML = Array.from({ length: 5 }, () => `<div class="aspect-[40/66] rounded-2xl bg-lid animate-pulse"></div>`).join('');
+      if (!movieCache[type]?.length || force) {
+        grid.innerHTML = Array.from({ length: 5 }, () => `<div class="aspect-[40/66] rounded-2xl bg-lid animate-pulse"></div>`).join('');
+      }
       try {
         const res = await fetch(`/api/bms/movies?region=${encodeURIComponent(currentCity.code)}&slug=${encodeURIComponent(currentCity.slug)}&type=${type}`);
-        const movies = movieCache[type] = await res.json();
-        if (!movies.length) {
-          grid.innerHTML = `<p class="col-span-full text-center py-12 text-[#8d879a] text-sm"><i class="fa-regular fa-eye-slash text-2xl block mb-2"></i>Nothing in sight here yet.</p>`;
-          return;
-        }
-        grid.innerHTML = movies.map((m, i) => `
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const movies = await res.json();
+        if (Array.isArray(movies) && movies.length) {
+          movieCache[type] = movies;
+          grid.innerHTML = movies.map((m, i) => `
           <button type="button" onclick="pickMovie('${type}', ${i})" class="group text-left">
             <div class="relative aspect-[40/66] rounded-2xl overflow-hidden bg-lid border border-lash group-hover:border-iris transition">
               <img src="${esc(m.image)}" alt="" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
@@ -487,8 +488,13 @@
             <h3 class="mt-2 text-sm font-semibold truncate" title="${esc(m.name)}">${esc(m.name)}</h3>
             ${m.subtitle ? `<p class="text-[11px] text-[#8d879a] truncate">${esc(m.subtitle)}</p>` : ''}
           </button>`).join('');
+        } else if (!movieCache[type]?.length) {
+          grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-[#8d879a] text-sm mb-3"><i class="fa-regular fa-eye-slash text-2xl block mb-2"></i>Nothing in sight here yet.</p><button type="button" onclick="fetchMovies('${type}', true)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
+        }
       } catch (err) {
-        grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-red-300 text-sm mb-3">Couldn't reach BookMyShow.</p><button type="button" onclick="fetchMovies('${type}')" class="btn-ghost px-4 py-2 text-xs">Try again</button></div>`;
+        if (!movieCache[type]?.length) {
+          grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-red-300 text-sm mb-3">Couldn't reach BookMyShow.</p><button type="button" onclick="fetchMovies('${type}', true)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
+        }
       } finally { populateFilmSelect(); }
     }
 
