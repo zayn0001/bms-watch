@@ -2,17 +2,37 @@ name: BMS Watch Scheduled Check
 
 on:
   schedule:
-    # Runs every 10 minutes to keep Render alive and check for ticket drops
+    # Runs directly on GitHub Actions runner every 10 minutes
     - cron: '*/10 * * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch: # Allows manual run button from GitHub Actions UI
 
 jobs:
-  ping-check:
+  check-tickets:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger BMS Watch Check & Prevent Sleep
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run BMS Watcher (Sync with Supabase & Check BMS)
         env:
-          APP_URL: ${{ secrets.RENDER_APP_URL || 'https://bms-watch.onrender.com' }}
+          # SMTP Alert Credentials
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: '465'
+          # Supabase Storage S3 Mirror (Same project as food-tracker/openGym)
+          MIRROR_ENDPOINT: ${{ secrets.MIRROR_ENDPOINT || 'https://ismyhkcsxrswqsfzfrxe.storage.supabase.co/storage/v1/s3' }}
+          MIRROR_BUCKET: default
+          MIRROR_PREFIX: bms_watch/
+          MIRROR_REGION: ap-southeast-1
+          MIRROR_KEY_ID: ${{ secrets.MIRROR_KEY_ID }}
+          MIRROR_SECRET: ${{ secrets.MIRROR_SECRET }}
         run: |
-          echo "Pinging $APP_URL/api/cron..."
-          curl -s -f -m 30 "$APP_URL/api/cron" || echo "Service waking up or unreachable"
+          # Pure Python standard library - zero pip dependencies needed!
+          python run.py --cli

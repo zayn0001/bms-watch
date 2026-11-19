@@ -87,21 +87,32 @@ def main():
 
     # 2. Single CLI check
     if args.cli:
-        log.info("Running single check...")
-        res = run_check_cycle()
-        print(f"BMS Check Complete: {res['watches_checked']} watches, {res['total_changes']} change(s) found.")
+        mirror = SupabaseStorageMirror(DATA_DIR)
+        mirror.pull()
+        try:
+            log.info("Running single check...")
+            res = run_check_cycle()
+            print(f"BMS Check Complete: {res['watches_checked']} watches, {res['total_changes']} change(s) found.")
+        finally:
+            mirror.push()
         return
 
     # 3. Terminal loop
     if args.loop:
+        mirror = SupabaseStorageMirror(DATA_DIR)
+        mirror.pull()
+        mirror.start_background_sync(interval_sec=5)
         every = args.loop
         log.info("Starting terminal loop every %ds (Press Ctrl+C to stop)...", every)
-        while True:
-            try:
-                run_check_cycle()
-            except Exception:
-                log.exception("Check crashed")
-            time.sleep(every)
+        try:
+            while True:
+                try:
+                    run_check_cycle()
+                except Exception:
+                    log.exception("Check crashed")
+                time.sleep(every)
+        finally:
+            mirror.push()
 
     # 4. Default: Full Web App + Background Worker + Supabase S3 Mirror
     mirror = SupabaseStorageMirror(DATA_DIR)
