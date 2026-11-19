@@ -36,6 +36,20 @@ flowchart TD
 
 ---
 
+## Supabase Integration (Shared Project, Dedicated Schema)
+
+This app integrates with your shared Supabase project (`ismyhkcsxrswqsfzfrxe`):
+
+- **Shared Auth & User Database:** Shares `auth.users` with `evenly`. Users can log in with their existing account or sign in with a 6-digit email OTP.
+- **Dedicated PostgreSQL Schema (`bms_watch`):** To avoid table name collisions with `public` or `evenly` (e.g. `evenly.groups`), all BMS Watch tables live inside their own isolated schema:
+  - `bms_watch.watches` (Row-Level Security: users only see and manage their own watches)
+  - `bms_watch.alert_logs`
+  - `bms_watch.state_cache`
+- **Migration Script:** The complete SQL schema is in [`supabase/migrations/20261119000000_bms_watch_schema.sql`](./supabase/migrations/20261119000000_bms_watch_schema.sql).
+- **PostgREST Configuration:** In the Supabase Dashboard, go to **Settings > API > PostgREST > Exposed Schemas** and add `bms_watch` alongside `public` and `evenly`.
+
+---
+
 ## Quick Start (Local)
 
 ### 1. Configure Environment

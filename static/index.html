@@ -373,7 +373,10 @@
         const key = cfg.supabase_anon_key || '';
         
         if (window.supabase && url && key) {
-          supabaseClient = window.supabase.createClient(url, key);
+          // Dedicated bms_watch schema matching evenly's schema isolation pattern
+          supabaseClient = window.supabase.createClient(url, key, {
+            db: { schema: 'bms_watch' }
+          });
           
           // Check active session
           const { data } = await supabaseClient.auth.getSession();

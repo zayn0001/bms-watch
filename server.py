@@ -84,11 +84,12 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         if path == "/api/health":
             return self._json(200, {"status": "ok", "app": "bms-watch"})
 
-        # Supabase Auth Config (shared with evenly)
+        # Supabase Auth Config (shared project, dedicated bms_watch schema)
         if path == "/api/config":
             return self._json(200, {
                 "supabase_url": os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.co"),
-                "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", ""))
+                "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "")),
+                "schema": "bms_watch"
             })
 
         # HTTP Cron endpoint (for external free crons or keep-alive pings)
