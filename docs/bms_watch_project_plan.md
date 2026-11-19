@@ -154,7 +154,7 @@ Rear:    ============================================================== (PROJECT
    * Params: `etCodes`, `dateCode`, `regionCode`, `isDesktop=true`, `language`, `refEventCode`.
    * Returns: Full list of venues, screens, formats, showtimes, availability pills (`AVAILABLE`, `FAST FILLING`, `ALMOST FULL`, `SOLD OUT`), session IDs (`sessionId`), and price breakdown.
 2. **Seat Layout & Availability Endpoint:**
-   * Internal session seat layout data via BMS web/mobile API.
+   * Internal session seat layout data via BMS web/mobile API (`/api/movies-data/v5/seat-layout` or web booking session query).
    * Returns: Physical row labels, grid seat numbers, pricing categories, and individual seat booking statuses (`0 = Available`, `1 = Booked`, `2 = Locked/Held`).
 3. **Region Discovery Endpoint:**
    * `GET https://in.bookmyshow.com/api/explore/v1/discover/regions`
@@ -271,22 +271,141 @@ erDiagram
 
 ---
 
-## 6. Implementation Phases
+## 6. Project Directory Structure
 
-1. **Phase 1: Repository Setup & Security Hardening (Immediate)**
-   - Initialize Git in local repository with strict `.gitignore`.
-   - Separate credentials into `.env` (sanitized from code).
-   - Create private repository on GitHub (`zayn0001/bms-watch`).
-2. **Phase 2: Core Scraper & Prime Seating Algorithm Engine**
-   - Asynchronous BMS client with header emulation and connection pooling.
-   - Pre-release / upcoming movie poller.
-   - Spatial geometry algorithm for center sweet spot and recliner detection.
-3. **Phase 3: Backend API & Data Persistence**
-   - FastAPI REST API for watches, regions, movies, and cinemas.
-   - Deduplicated polling scheduler with database state persistence.
-4. **Phase 5: Web UI Frontend**
-   - Next.js / React application with Watch Creation Wizard.
-   - Interactive preview of auditorium sweet-spots.
-5. **Phase 5: Containerization, Testing & Deployment**
-   - Docker Compose configuration for one-command startup.
-   - GitHub Actions CI workflow for test verification.
+```
+bms_watch/
+├── .github/
+│   └── workflows/
+│       ├── test.yml                 # Linting and pytest workflow
+│       └── docker-build.yml         # Container build on main branch
+├── .env.example                     # Environment template (NO SECRETS)
+├── .gitignore                       # Ignores .env, logs, pycache, state.json
+├── docker-compose.yml               # Multi-service stack (db, redis, api, worker, web)
+├── README.md                        # Setup and developer documentation
+│
+├── backend/                         # FastAPI Application
+│   ├── app/
+│   │   ├── api/                     # REST routes (/v1/movies, /theatres, /watches)
+│   │   ├── core/                    # Config (pydantic-settings), security, logging
+│   │   ├── db/                      # SQLAlchemy models, session, migrations (alembic)
+│   │   ├── schemas/                 # Pydantic request/response schemas
+│   │   ├── scraper/                 # BMS API reverse-engineered client
+│   │   │   ├── client.py            # Async HTTP client with headers & rate-limiting
+│   │   │   ├── parser.py            # Showtimes & venue parser
+│   │   │   ├── prime_seating.py     # Sweet-spot geometry detection algorithm
+│   │   │   └── diff.py              # Availability diff engine
+│   │   ├── services/                # Notification & watch matching logic
+│   │   │   ├── email_service.py     # HTML email builder & SMTP/Resend sender
+│   │   │   └── watch_matcher.py     # Matches scraped changes against user criteria
+│   │   └── main.py                  # FastAPI entry point
+│   ├── tests/                       # Pytest test suite
+│   ├── Dockerfile
+│   └── pyproject.toml / requirements.txt
+│
+├── worker/                          # Background Poller Service
+│   ├── scheduler.py                 # Periodic job orchestrator (APScheduler / Celery)
+│   └── tasks.py                     # Scrape jobs & alert dispatchers
+│
+└── frontend/                        # Web UI (Next.js or React SPA)
+    ├── src/
+    │   ├── app/                     # Pages (Catalog, Watch Wizard, Dashboard)
+    │   ├── components/              # UI components (CinemaPicker, FormatFilters, SeatMap)
+    │   ├── hooks/                   # React Query / data fetching hooks
+    │   └── lib/                     # API client & helpers
+    ├── package.json
+    └── tailwind.config.js
+```
+
+---
+
+## 7. Step-by-Step Implementation Roadmap
+
+```mermaid
+flowchart LR
+    P1["Phase 1:<br/>Git Repo & Security Sanity"] --> P2["Phase 2:<br/>Modular Core & Prime Algorithm"]
+    P2 --> P3["Phase 3:<br/>FastAPI Backend & Database"]
+    P3 --> P4["Phase 4:<br/>Web UI & Watch Wizard"]
+    P4 --> P5["Phase 5:<br/>Deploy, Docker & Launch"]
+```
+
+### Phase 1: Repository Setup & Security Hardening (Immediate)
+1. Initialize Git in the local `bms_watch` workspace.
+2. Create `.gitignore` to strictly exclude `.env`, `*.log`, `state.json`, and `__pycache__`.
+3. Sanitize `bms_watch.py` to extract credentials into environment variables (`.env`).
+4. Create private GitHub repository `zayn0001/bms-watch` via `gh cli` and push initial baseline.
+
+### Phase 2: Core Scraper & Prime Seating Algorithm Engine
+1. Refactor scraper into an asynchronous client with connection pooling (`httpx` / `aiohttp`).
+2. Implement upcoming/pre-release movie status poller.
+3. Implement `prime_seating.py`:
+   * Center 35%–65% column calculations.
+   * Row depth tiering (middle-to-back 40%–80%).
+   * Contiguous $N$-seats adjacent verification.
+4. Unit tests verifying prime seating classification against simulated cinema layouts.
+
+### Phase 3: Backend API & Data Persistence
+1. Setup FastAPI with Pydantic v2 validation.
+2. Build SQLAlchemy models for Users, Watches, Cinemas, Formats, and History.
+3. Expose REST endpoints:
+   * `GET /api/v1/regions` (searchable BMS cities)
+   * `GET /api/v1/movies` (now showing + upcoming catalog)
+   * `GET /api/v1/cinemas?region=COIM` (cinemas in city)
+   * `POST /api/v1/watches` (create watch with email, filters, prime seating)
+   * `DELETE /api/v1/watches/{id}` & `GET /api/v1/watches/unsubscribe/{token}`
+4. Integrate background scheduler with smart deduplication.
+
+### Phase 4: Modern Web Frontend
+1. Build responsive web application (Next.js 14 / Vite React + Tailwind CSS).
+2. Clean Step-by-Step Watch Wizard:
+   * Step 1: Search movie or select from "Coming Soon" blockbusters.
+   * Step 2: Choose city & select cinemas (with "Select All IMAX / EPIQ / PXL" quick-filters).
+   * Step 3: Choose dates & formats.
+   * Step 4: Toggle "Prime Seating Only" & specify number of seats.
+   * Step 5: Enter email and verify watch.
+3. Visual interactive seat grid diagram showing what the "Sweet Spot" entails.
+
+### Phase 5: Containerization, Testing & Deployment
+1. Compose `docker-compose.yml` and `Dockerfile` for unified container and Render deployment.
+2. Setup GitHub Actions CI/cron for scheduled checking (`cron-check.yml` every 10 min).
+3. Supabase Storage S3 mirror (`mirror.py`) syncing state between ephemeral cloud nodes and Supabase.
+
+---
+
+## 9. Implementation Architecture: TV & Remote Control Experience
+
+### A. Cinema CRT / OLED TV Aesthetic
+* **Dual-Panel Cinema Monitor**:
+  * Curved glass bezel with CRT scanline raster effect and dynamic glow.
+  * Live On-Screen Display (OSD) banner showing channel number, tuned city, audio mode (STEREO / ATMOS), and 24-hour digital clock.
+* **Channels Roster**:
+  * **Channel 01 (`CH 01: NOW SHOWING`)**: Live movie grid with high-resolution poster art, event codes (`ET...`), slugs, and one-click "TUNE WATCH" action.
+  * **Channel 02 (`CH 02: COMING SOON`)**: Live upcoming satellite stream for pre-release blockbusters.
+  * **Channel 03 (`CH 03: ACTIVE RADAR`)**: Live ticket watches with pulsating status indicators, instant enable/pause toggles, and delete controls.
+  * **Channel 04 (`CH 04: SEAT RADAR`)**: Optical & acoustic sweet-spot heat map visualizer displaying screen curve, front neck-strain warnings, and optimal center tiers.
+  * **Channel 05 (`CH 05: PROGRAMMER`)**: Tactical watch creation tuner with date presets, cinema multi-tags, format pills, prime seating toggle, and auto-filled user email.
+
+### B. Tactile Handheld TV Remote Control
+* Ergonomic dark-charcoal remote chassis with simulated infrared emitter LED that blinks on button press.
+* **Remote Keypad**:
+  * **Power Button**: Toggles TV standby mode (powers monitor off with scanline collapse animation).
+  * **City Tuner Dropdown**: Direct region changer (Mumbai, Bengaluru, Coimbatore, Delhi-NCR, Hyderabad, etc.).
+  * **Numeric Channel Keys (1–5)**: Direct channel jump.
+  * **Channel Rocker (`CH ▲` / `CH ▼`)**: Sequential channel navigation.
+  * **D-Pad & `OK` Button**: Tactile navigation controls.
+  * **Teletext Macro Buttons**:
+    * 🔴 Red: Scan Now (`POST /api/check-now`)
+    * 🟢 Green: Program New Watch (Jump to CH 05)
+    * 🟡 Yellow: Sweet Spot Matrix (Jump to CH 04)
+    * 🔵 Blue: Account & Supabase OTP Modal
+
+### C. Live Reverse-Engineered BMS APIs
+* **Regions Discovery**: `https://in.bookmyshow.com/api/explore/v1/discover/regions`
+* **Movies Discovery**: `https://in.bookmyshow.com/api/explore/v1/discover/movies`
+  * Requires dynamic `x-bms-id` UUID header and region code/slug query parameters.
+  * Caches responses in-memory for 10 minutes to respect BookMyShow rate limits.
+
+### D. Supabase Auth & Multi-App Schema Isolation (`evenly` Pattern)
+* **Auth Reuse**: Replicates `evenly`'s 6-digit email OTP modal (`verifyOtp({ email, token, type: 'signup' })`), passwordless sign-in, and account registration with `options.data.app = 'bms_watch'`.
+* **Database Isolation**: Dedicated `bms_watch` PostgreSQL schema (`bms_watch.watches`, `bms_watch.state_cache`, `bms_watch.alert_logs`) with Row Level Security (RLS) policies scoped to `auth.uid() = user_id`. Grants strictly applied to `authenticated` and `service_role`.
+* **Supabase Client**: Configured with `{ db: { schema: 'bms_watch' } }`.

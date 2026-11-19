@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BMS Watch — Movie Ticket & Prime Seating Tracker</title>
+  <title>BMS Watch — CineVision TV & Remote Ticket Tracker</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
@@ -14,11 +14,14 @@
           colors: {
             brand: '#eb4e62',
             brandHover: '#d93b4f',
-            darkBg: '#0b0f17',
-            cardBg: '#131b26',
-            borderCol: '#202b3c',
+            tvDark: '#07090e',
+            tvBezel: '#181e29',
+            tvScreen: '#0c1017',
+            remoteBg: '#1e2532',
+            remoteKey: '#2c3545',
+            remoteKeyActive: '#3d485c',
             accentGreen: '#1ea83c',
-            accentGold: '#e8a900'
+            accentGold: '#f59e0b'
           }
         }
       }
@@ -26,37 +29,72 @@
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    body { background-color: #0b0f17; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #07090e; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
+    
+    /* CRT & Television FX */
+    .tv-glass {
+      position: relative;
+      background: radial-gradient(circle at 50% 30%, #111722 0%, #080c12 100%);
+      box-shadow: inset 0 0 100px rgba(0,0,0,0.8), 0 20px 50px rgba(0,0,0,0.9);
+    }
+    .tv-scanlines {
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 3px, 6px 100%;
+      pointer-events: none;
+    }
+    .channel-flicker {
+      animation: flicker 0.2s ease-in-out;
+    }
+    @keyframes flicker {
+      0% { opacity: 0.3; filter: brightness(2) contrast(1.5); }
+      50% { opacity: 0.8; filter: brightness(0.7); }
+      100% { opacity: 1; filter: brightness(1); }
+    }
+    
+    /* Tactile Remote Buttons */
+    .btn-remote {
+      transition: all 0.08s ease-in-out;
+      box-shadow: 0 4px 0 #151b26, 0 5px 8px rgba(0,0,0,0.5);
+    }
+    .btn-remote:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #151b26, 0 2px 4px rgba(0,0,0,0.4);
+    }
+    
     .screen-curve {
-      height: 12px;
+      height: 14px;
       border-radius: 50% / 100% 100% 0 0;
       background: linear-gradient(180deg, rgba(235, 78, 98, 0.8) 0%, rgba(235, 78, 98, 0.1) 100%);
       box-shadow: 0 0 25px rgba(235, 78, 98, 0.4);
     }
   </style>
 </head>
-<body class="min-h-screen pb-16">
+<body class="min-h-screen pb-12 selection:bg-brand selection:text-white">
 
-  <!-- Top Navigation -->
-  <header class="border-b border-borderCol bg-cardBg/80 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+  <!-- Top TV Header Bar -->
+  <header class="border-b border-slate-800 bg-tvBezel/90 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <div class="w-9 h-9 rounded-lg bg-brand flex items-center justify-center text-white shadow-lg shadow-brand/30">
-          <i class="fa-solid fa-ticket"></i>
+        <div class="w-8 h-8 rounded-lg bg-brand flex items-center justify-center text-white shadow-lg shadow-brand/40">
+          <i class="fa-solid fa-tv text-sm"></i>
         </div>
-        <div>
-          <span class="font-extrabold text-lg tracking-wide text-white">BMS <span class="text-brand">WATCH</span></span>
-          <span class="text-xs text-slate-400 block -mt-1">Prime Seating & Ticket Tracker</span>
+        <div class="flex items-baseline space-x-2">
+          <span class="font-extrabold text-base tracking-wider text-white">CINE<span class="text-brand">VISION</span></span>
+          <span class="text-[10px] text-slate-400 font-mono hidden sm:inline">PRO BROADCAST &middot; BMS WATCH</span>
         </div>
       </div>
       <div class="flex items-center space-x-3">
-        <button id="btnCheckNow" onclick="triggerManualCheck()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition flex items-center space-x-1.5">
-          <i class="fa-solid fa-rotate" id="checkIcon"></i>
-          <span class="hidden sm:inline">Check Availability Now</span>
-        </button>
-        <!-- Account Status (Matching evenly's Topbar) -->
+        <!-- City Tuner Selector -->
+        <div class="flex items-center space-x-1.5 bg-slate-900 border border-slate-700 px-2.5 py-1 rounded-lg text-xs">
+          <i class="fa-solid fa-satellite-dish text-brand text-xs"></i>
+          <span class="text-[10px] text-slate-400 font-semibold uppercase">TUNER:</span>
+          <select id="tunerCitySelect" onchange="handleTunerCityChange()" class="bg-transparent text-white font-bold focus:outline-none cursor-pointer text-xs">
+            <!-- Dynamically populated from BMS API -->
+          </select>
+        </div>
+        <!-- Account Status Area -->
         <div id="authNavArea">
-          <button onclick="openAuthModal('sign-in')" class="px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brandHover text-xs font-bold text-white shadow-lg shadow-brand/20 transition flex items-center space-x-1.5">
+          <button onclick="openAuthModal('sign-in')" class="px-3 py-1 rounded-lg bg-brand hover:bg-brandHover text-xs font-bold text-white shadow transition flex items-center space-x-1.5">
             <i class="fa-solid fa-user"></i>
             <span>Sign In / OTP</span>
           </button>
@@ -65,245 +103,401 @@
     </div>
   </header>
 
-  <main class="max-w-6xl mx-auto px-4 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+  <!-- Main Television Deck -->
+  <div class="max-w-7xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
-    <!-- Left Column: Watch Creation Wizard -->
-    <div class="lg:col-span-7 space-y-6">
+    <!-- ======================================================================= -->
+    <!-- LEFT: The Television Screen Monitor -->
+    <!-- ======================================================================= -->
+    <div class="lg:col-span-8 space-y-4">
       
-      <!-- Pre-Release Showcase -->
-      <div class="bg-cardBg border border-borderCol rounded-xl p-5 shadow-xl">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center">
-            <i class="fa-solid fa-fire text-brand mr-2"></i> Upcoming Pre-Release Watches
-          </h2>
-          <span class="text-xs bg-brand/20 text-brand px-2 py-0.5 rounded font-medium">1-Click Watch</span>
+      <!-- TV Cabinet / Outer Frame -->
+      <div class="bg-tvBezel p-3 sm:p-5 rounded-3xl border-4 border-slate-700 shadow-2xl relative">
+        
+        <!-- On-Screen Display (OSD) Bar -->
+        <div class="bg-slate-900/90 border border-slate-700/80 rounded-t-2xl px-4 py-2 flex items-center justify-between font-mono text-[11px] text-slate-300">
+          <div class="flex items-center space-x-2">
+            <span class="inline-flex items-center px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 animate-pulse font-bold">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5"></span>LIVE BMS FEED
+            </span>
+            <span id="osdChannelBadge" class="text-brand font-extrabold tracking-wider">CH 01 &middot; NOW SHOWING</span>
+          </div>
+          <div class="flex items-center space-x-3 text-[10px] text-slate-400">
+            <span id="osdCityBadge"><i class="fa-solid fa-location-dot text-brand mr-1"></i>COIMBATORE</span>
+            <span class="hidden sm:inline">&middot; STEREO ATMOS</span>
+            <span id="osdClock">12:00</span>
+          </div>
         </div>
-        <p class="text-xs text-slate-400 mb-4">Select an upcoming blockbuster to monitor before bookings go live:</p>
-        <div id="preReleaseGrid" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <!-- Populated by JS -->
-        </div>
-      </div>
 
-      <!-- Main Watch Builder -->
-      <div class="bg-cardBg border border-borderCol rounded-xl p-6 shadow-xl">
-        <h2 class="text-base font-bold text-white mb-4 flex items-center">
-          <i class="fa-solid fa-wand-magic-sparkles text-brand mr-2"></i> Create Ticket Watch
-        </h2>
-
-        <form id="watchForm" onsubmit="handleCreateWatch(event)" class="space-y-5">
+        <!-- TV Glass Screen -->
+        <div id="tvScreen" class="tv-glass rounded-b-2xl p-4 sm:p-6 min-h-[580px] relative overflow-hidden border-x border-b border-slate-800">
           
-          <!-- Movie Title & Event Code -->
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-semibold text-slate-300 mb-1">Movie Title</label>
-              <input type="text" id="movieTitle" required placeholder="e.g. Avengers: Doomsday" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1">BMS Event Code</label>
-              <input type="text" id="eventCode" required placeholder="e.g. ET00526306" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
-            </div>
-          </div>
+          <!-- Subtle Scanlines Overlay -->
+          <div class="tv-scanlines absolute inset-0 z-10 opacity-30"></div>
 
-          <!-- City Selection -->
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">City / Region</label>
-            <select id="regionSelect" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
-              <!-- Populated by JS -->
-            </select>
-          </div>
-
-          <!-- Theatres Multi-Select / Filter -->
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Target Cinemas (Comma-separated, leave blank for ALL)</label>
-            <input type="text" id="cinemaFilter" placeholder="e.g. Broadway, PVR, INOX (blank = all in city)" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
-            <p class="text-[11px] text-slate-500 mt-1">Leave empty to alert whenever ANY cinema in this city opens booking.</p>
-          </div>
-
-          <!-- Dates to Watch -->
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <label class="block text-xs font-semibold text-slate-300">Dates to Watch (YYYYMMDD, comma-separated)</label>
-              <div class="space-x-1.5">
-                <button type="button" onclick="addDatesPreset('dec_doomsday')" class="text-[11px] text-brand hover:underline">+ Doomsday Dates</button>
-                <button type="button" onclick="addDatesPreset('this_weekend')" class="text-[11px] text-slate-400 hover:underline">+ This Weekend</button>
-              </div>
-            </div>
-            <input type="text" id="watchDates" required placeholder="20261217, 20261218, 20261219" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand font-mono">
-          </div>
-
-          <!-- Format Filters -->
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-2">Filter Formats & Screens</label>
-            <div id="formatPills" class="flex flex-wrap gap-2">
-              <!-- Populated by JS -->
-            </div>
-          </div>
-
-          <!-- Prime Seating Section -->
-          <div class="p-4 rounded-lg bg-slate-900/60 border border-borderCol/80">
-            <div class="flex items-center justify-between">
+          <!-- ================================================================= -->
+          <!-- CHANNEL 1: Now Showing Live in City (BMS API) -->
+          <!-- ================================================================= -->
+          <div id="channel_1" class="channel-view space-y-4 relative z-20">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
               <div>
-                <span class="text-sm font-bold text-white flex items-center">
-                  <i class="fa-solid fa-crown text-accentGold mr-2"></i> Prime Seating Identification
-                </span>
-                <p class="text-xs text-slate-400 mt-0.5">Only alert if seats are in the mid-center sweet spot or recliner/club rows</p>
+                <h2 class="text-lg font-black tracking-wide text-white flex items-center">
+                  <i class="fa-solid fa-film text-brand mr-2"></i> NOW RUNNING IN THEATRES
+                </h2>
+                <p class="text-xs text-slate-400">Live running releases fetched directly from BookMyShow API.</p>
               </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="primeSeatsToggle" class="sr-only peer">
-                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accentGold"></div>
-              </label>
+              <button onclick="fetchLiveBMSMovies('movies')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded border border-slate-700">
+                <i class="fa-solid fa-rotate mr-1"></i>Refresh
+              </button>
             </div>
 
-            <!-- Adjacent Seats Selection -->
-            <div class="mt-3 pt-3 border-t border-borderCol/50 flex items-center justify-between text-xs">
-              <span class="text-slate-300">Min. contiguous seats together:</span>
-              <select id="minSeats" class="bg-slate-800 border border-borderCol text-white rounded px-2 py-1">
-                <option value="1">1 Seat</option>
-                <option value="2" selected>2 Seats Together</option>
-                <option value="3">3 Seats Together</option>
-                <option value="4">4 Seats Together</option>
-              </select>
+            <!-- Dynamic BMS Movies Grid -->
+            <div id="runningMoviesGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 pt-2">
+              <div class="col-span-full text-center py-12 text-slate-500 font-mono text-xs">
+                <i class="fa-solid fa-spinner fa-spin text-brand text-lg mb-2 block"></i> Tuning in to local cinema broadcast...
+              </div>
             </div>
           </div>
 
-          <!-- User Email -->
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Your Email for Instant Alerts</label>
-            <div class="relative">
-              <i class="fa-regular fa-envelope absolute left-3 top-3 text-slate-500 text-sm"></i>
-              <input type="email" id="userEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-borderCol rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+          <!-- ================================================================= -->
+          <!-- CHANNEL 2: Upcoming / Coming Soon Blockbusters (BMS API) -->
+          <!-- ================================================================= -->
+          <div id="channel_2" class="channel-view space-y-4 relative z-20 hidden">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div>
+                <h2 class="text-lg font-black tracking-wide text-white flex items-center">
+                  <i class="fa-solid fa-rocket text-accentGold mr-2"></i> UPCOMING &amp; PRE-RELEASES
+                </h2>
+                <p class="text-xs text-slate-400">Put watches before bookings open. Get alerted when tickets go live.</p>
+              </div>
+              <button onclick="fetchLiveBMSMovies('upcoming')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded border border-slate-700">
+                <i class="fa-solid fa-rotate mr-1"></i>Refresh
+              </button>
             </div>
-            <p id="emailHint" class="text-[11px] text-slate-500 mt-1">Sign in with OTP above to sync watches with your Evenly account.</p>
+
+            <!-- Upcoming Movies Grid -->
+            <div id="upcomingMoviesGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 pt-2">
+              <div class="col-span-full text-center py-12 text-slate-500 font-mono text-xs">
+                <i class="fa-solid fa-spinner fa-spin text-accentGold text-lg mb-2 block"></i> Loading pre-release radar...
+              </div>
+            </div>
           </div>
 
-          <button type="submit" class="w-full py-2.5 rounded-lg bg-brand hover:bg-brandHover text-white font-bold text-sm shadow-lg shadow-brand/20 transition flex items-center justify-center space-x-2">
-            <i class="fa-solid fa-bell"></i>
-            <span>Create Movie Watch</span>
+          <!-- ================================================================= -->
+          <!-- CHANNEL 3: Active Ticket Watches -->
+          <!-- ================================================================= -->
+          <div id="channel_3" class="channel-view space-y-4 relative z-20 hidden">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div>
+                <h2 class="text-lg font-black tracking-wide text-white flex items-center">
+                  <i class="fa-solid fa-satellite text-accentGreen mr-2"></i> ACTIVE RADAR CHANNELS
+                </h2>
+                <p class="text-xs text-slate-400">Currently active ticket watches polling BookMyShow.</p>
+              </div>
+              <button onclick="triggerManualCheck()" class="px-3 py-1 bg-brand hover:bg-brandHover text-xs font-bold text-white rounded shadow">
+                <i class="fa-solid fa-bolt mr-1"></i>Scan Now
+              </button>
+            </div>
+
+            <!-- Watches List -->
+            <div id="watchesChannelList" class="space-y-3 pt-2">
+              <div class="text-center py-12 text-slate-500 font-mono text-xs">Loading active watches...</div>
+            </div>
+          </div>
+
+          <!-- ================================================================= -->
+          <!-- CHANNEL 4: Prime Seat Sweet-Spot Radar Visualizer -->
+          <!-- ================================================================= -->
+          <div id="channel_4" class="channel-view space-y-4 relative z-20 hidden">
+            <div class="border-b border-slate-800/80 pb-3">
+              <h2 class="text-lg font-black tracking-wide text-white flex items-center">
+                <i class="fa-solid fa-crosshairs text-brand mr-2"></i> PRIME SEATING ACOUSTIC MATRIX
+              </h2>
+              <p class="text-xs text-slate-400">Visual geometry representation of cinema auditorium acoustics &amp; sightlines.</p>
+            </div>
+
+            <div class="bg-slate-950 p-6 rounded-2xl border border-slate-800 text-center relative overflow-hidden">
+              <div class="screen-curve mb-2 mx-8"></div>
+              <span class="text-xs text-slate-500 tracking-widest block uppercase font-mono mb-6">Cinema Screen</span>
+
+              <!-- Auditorium Seat Grid -->
+              <div class="space-y-2 max-w-sm mx-auto text-[10px] font-mono">
+                <!-- Row A-C (Avoid) -->
+                <div class="flex justify-center space-x-1.5 opacity-30">
+                  <span class="px-2 py-0.5 bg-red-950/60 border border-red-800/50 rounded text-red-400">Row A &middot; Neck Strain (Angle &gt; 35&deg;)</span>
+                </div>
+                <div class="flex justify-center space-x-1.5 opacity-40">
+                  <span class="px-2 py-0.5 bg-slate-800 rounded text-slate-400">Row B &middot; Front Zone</span>
+                </div>
+
+                <!-- Sweet Spot Matrix -->
+                <div class="my-3 p-3 rounded-xl border border-accentGold/50 bg-accentGold/10 relative shadow-lg shadow-accentGold/5">
+                  <div class="text-xs text-accentGold font-black mb-1.5 flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-crown text-[10px]"></i>
+                    <span>PRIME OPTICAL &amp; DOLBY ATMOS SWEET SPOT</span>
+                    <i class="fa-solid fa-crown text-[10px]"></i>
+                  </div>
+                  <div class="flex justify-center space-x-1.5 my-2">
+                    <div class="w-6 h-4 bg-slate-800 rounded opacity-40" title="Left Flank"></div>
+                    <div class="w-6 h-4 bg-accentGreen rounded shadow-md shadow-accentGreen/50" title="Prime Center 1"></div>
+                    <div class="w-6 h-4 bg-accentGreen rounded shadow-md shadow-accentGreen/50" title="Prime Center 2"></div>
+                    <div class="w-6 h-4 bg-accentGreen rounded shadow-md shadow-accentGreen/50" title="Prime Center 3"></div>
+                    <div class="w-6 h-4 bg-slate-800 rounded opacity-40" title="Right Flank"></div>
+                  </div>
+                  <div class="text-[10px] text-slate-300 font-bold">40%–85% Row Depth &middot; Center 35%–65% Width</div>
+                </div>
+
+                <!-- Recliners -->
+                <div class="flex justify-center space-x-1.5 text-slate-300">
+                  <span class="px-3 py-1 bg-brand/20 border border-brand/50 rounded-lg text-brand font-bold">
+                    Row P &middot; Recliner / Club VIP Lounge
+                  </span>
+                </div>
+              </div>
+
+              <div class="mt-6 text-left text-xs text-slate-400 bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                <span class="font-bold text-white block mb-1">How the Sweet Spot Engine works:</span>
+                When BookMyShow opens seats, the geometry engine inspects row coordinates, filters out front rows A–D, and only triggers if consecutive adjacent seats ($N \ge 2$) are open in the middle third of the auditorium.
+              </div>
+            </div>
+          </div>
+
+          <!-- ================================================================= -->
+          <!-- CHANNEL 5: Quick Ticket Watch Programmer (Builder) -->
+          <!-- ================================================================= -->
+          <div id="channel_5" class="channel-view space-y-4 relative z-20 hidden">
+            <div class="border-b border-slate-800/80 pb-3">
+              <h2 class="text-lg font-black tracking-wide text-white flex items-center">
+                <i class="fa-solid fa-sliders text-brand mr-2"></i> WATCH PROGRAMMER
+              </h2>
+              <p class="text-xs text-slate-400">Tune custom cinema targets, dates, screen formats, and prime seating.</p>
+            </div>
+
+            <form id="watchProgrammerForm" onsubmit="handleProgrammerSubmit(event)" class="space-y-4 pt-1">
+              
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="sm:col-span-2">
+                  <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Movie Title</label>
+                  <input type="text" id="progTitle" required placeholder="e.g. Avengers: Doomsday" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand font-bold">
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Event Code</label>
+                  <input type="text" id="progEventCode" required placeholder="e.g. ET00439706" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand font-mono font-bold">
+                </div>
+              </div>
+
+              <!-- Dates & Quick Buttons -->
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Dates to Watch (YYYYMMDD)</label>
+                  <div class="space-x-1.5">
+                    <button type="button" onclick="setDatesPreset('weekend')" class="text-[10px] text-brand hover:underline font-bold">+ This Weekend</button>
+                    <button type="button" onclick="setDatesPreset('doomsday')" class="text-[10px] text-slate-400 hover:underline font-bold">+ Dec Doomsday</button>
+                  </div>
+                </div>
+                <input type="text" id="progDates" required placeholder="20261218, 20261219, 20261220" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand font-mono">
+              </div>
+
+              <!-- Cinemas Filter -->
+              <div>
+                <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Target Cinemas (Comma-separated or leave blank for ALL)</label>
+                <input type="text" id="progCinemas" placeholder="e.g. Broadway, PVR, INOX (blank = all in city)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand">
+              </div>
+
+              <!-- Format Filter Pills -->
+              <div>
+                <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Screen Experience</label>
+                <div id="progFormatPills" class="flex flex-wrap gap-1.5">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+
+              <!-- Prime Seating Checkbox -->
+              <div class="p-3 bg-slate-900/90 border border-slate-700 rounded-xl flex items-center justify-between">
+                <div>
+                  <span class="text-xs font-bold text-white flex items-center">
+                    <i class="fa-solid fa-crown text-accentGold mr-1.5"></i> Prime Seating Only (Sweet Spot)
+                  </span>
+                  <span class="text-[10px] text-slate-400">Only alert if seats are in middle center rows or recliners</span>
+                </div>
+                <input type="checkbox" id="progPrimeToggle" class="w-4 h-4 accent-brand cursor-pointer">
+              </div>
+
+              <!-- Alert Email -->
+              <div>
+                <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Recipient Email</label>
+                <input type="email" id="progEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand">
+              </div>
+
+              <button type="submit" class="w-full py-2.5 rounded-xl bg-brand hover:bg-brandHover text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-brand/30 transition flex items-center justify-center space-x-2">
+                <i class="fa-solid fa-satellite-dish"></i>
+                <span>Program Ticket Watch</span>
+              </button>
+            </form>
+          </div>
+
+        </div>
+
+        <!-- TV Standby LED & Brand Bar -->
+        <div class="mt-3 flex items-center justify-between px-2">
+          <div class="flex items-center space-x-2">
+            <span id="tvStandbyLed" class="w-2.5 h-2.5 rounded-full bg-accentGreen shadow-lg shadow-accentGreen/50 animate-pulse"></span>
+            <span class="text-[10px] font-mono text-slate-400">TV STATUS: ONLINE</span>
+          </div>
+          <span class="text-[10px] font-mono tracking-widest text-slate-500 font-bold uppercase">SONY TRINITRON OLED MATRIX</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ======================================================================= -->
+    <!-- RIGHT: Tactile Handheld TV Remote Control -->
+    <!-- ======================================================================= -->
+    <div class="lg:col-span-4 flex justify-center sticky top-20">
+      
+      <!-- Remote Control Chassis -->
+      <div class="w-72 bg-gradient-to-b from-[#1c2330] to-[#121721] p-5 rounded-[40px] border-4 border-slate-700 shadow-2xl relative select-none">
+        
+        <!-- Infrared Transmitter Bulb & Indicator LED -->
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2 w-8 h-4 rounded-t-full bg-red-950 border-2 border-red-800 flex items-center justify-center">
+          <span id="remoteIrLed" class="w-2 h-2 rounded-full bg-red-600 opacity-20"></span>
+        </div>
+
+        <div class="text-center mb-4">
+          <span class="text-[9px] font-mono tracking-widest text-slate-400 uppercase font-bold">CineRemote &middot; BMS Commander</span>
+        </div>
+
+        <!-- Remote Top: Power & Tuner City -->
+        <div class="flex items-center justify-between mb-5 px-1">
+          <button onclick="handleRemoteButton('power')" class="btn-remote w-11 h-11 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center text-sm shadow-md" title="Standby / Power">
+            <i class="fa-solid fa-power-off"></i>
           </button>
-        </form>
 
-      </div>
-    </div>
-
-    <!-- Right Column: Interactive Seat Preview & Active Watches -->
-    <div class="lg:col-span-5 space-y-6">
-
-      <!-- Interactive Sweet-Spot Preview Widget -->
-      <div class="bg-cardBg border border-borderCol rounded-xl p-5 shadow-xl">
-        <div class="flex items-center justify-between mb-2">
-          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center">
-            <i class="fa-solid fa-eye text-brand mr-2"></i> Prime Seating "Sweet Spot" Preview
-          </h3>
-          <span class="text-[11px] text-accentGold font-medium">Optimal Geometry</span>
+          <!-- Input/Source Button -->
+          <button onclick="handleRemoteButton('input')" class="btn-remote px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-bold font-mono tracking-wider" title="Change Input/Broadcast City">
+            <i class="fa-solid fa-satellite-dish mr-1 text-brand"></i>SOURCE
+          </button>
         </div>
 
-        <div class="bg-slate-950 p-4 rounded-lg border border-slate-800 text-center relative overflow-hidden">
-          <div class="screen-curve mb-1 mx-4"></div>
-          <span class="text-[10px] text-slate-500 tracking-widest block uppercase font-mono mb-4">Auditorium Screen</span>
+        <!-- Numeric Channel Keypad (Channels 1 to 5) -->
+        <div class="grid grid-cols-3 gap-2.5 mb-5 px-2">
+          <button onclick="switchChannel(1)" class="btn-remote h-10 rounded-xl bg-remoteKey text-white font-mono font-bold text-xs flex flex-col items-center justify-center hover:bg-remoteKeyActive">
+            <span>1</span>
+            <span class="text-[8px] text-slate-400">NOW</span>
+          </button>
+          <button onclick="switchChannel(2)" class="btn-remote h-10 rounded-xl bg-remoteKey text-white font-mono font-bold text-xs flex flex-col items-center justify-center hover:bg-remoteKeyActive">
+            <span>2</span>
+            <span class="text-[8px] text-slate-400">SOON</span>
+          </button>
+          <button onclick="switchChannel(3)" class="btn-remote h-10 rounded-xl bg-remoteKey text-white font-mono font-bold text-xs flex flex-col items-center justify-center hover:bg-remoteKeyActive">
+            <span>3</span>
+            <span class="text-[8px] text-slate-400">WATCH</span>
+          </button>
+          <button onclick="switchChannel(4)" class="btn-remote h-10 rounded-xl bg-remoteKey text-white font-mono font-bold text-xs flex flex-col items-center justify-center hover:bg-remoteKeyActive">
+            <span>4</span>
+            <span class="text-[8px] text-slate-400">RADAR</span>
+          </button>
+          <button onclick="switchChannel(5)" class="btn-remote h-10 rounded-xl bg-remoteKey text-white font-mono font-bold text-xs flex flex-col items-center justify-center hover:bg-remoteKeyActive">
+            <span>5</span>
+            <span class="text-[8px] text-slate-400">SETUP</span>
+          </button>
+          <button onclick="switchChannel((currentChannel % 5) + 1)" class="btn-remote h-10 rounded-xl bg-slate-800 text-slate-300 font-mono font-bold text-[10px] flex items-center justify-center hover:bg-slate-700">
+            <i class="fa-solid fa-forward-step"></i>
+          </button>
+        </div>
 
-          <!-- Simulated Seat Layout -->
-          <div class="space-y-1.5 max-w-[280px] mx-auto text-[9px] font-mono">
-            <!-- Front Rows (Avoid) -->
-            <div class="flex justify-center space-x-1 opacity-30">
-              <div class="px-1 bg-slate-700 rounded text-slate-400">Row A (Neck Strain)</div>
-            </div>
-            <div class="flex justify-center space-x-1 opacity-40">
-              <div class="px-1 bg-slate-700 rounded text-slate-400">Row B (Avoid)</div>
-            </div>
-
-            <!-- Sweet Spot Zone -->
-            <div class="my-2 p-2 rounded border border-accentGold/40 bg-accentGold/10 relative">
-              <div class="text-[10px] text-accentGold font-bold mb-1 flex items-center justify-center">
-                <i class="fa-solid fa-star text-[9px] mr-1"></i> PRIME CENTER SWEET SPOT <i class="fa-solid fa-star text-[9px] ml-1"></i>
-              </div>
-              <div class="flex justify-center space-x-1 my-1">
-                <div class="w-4 h-3 bg-slate-700 rounded opacity-40"></div>
-                <div class="w-4 h-3 bg-accentGreen rounded shadow-sm shadow-accentGreen/50"></div>
-                <div class="w-4 h-3 bg-accentGreen rounded shadow-sm shadow-accentGreen/50"></div>
-                <div class="w-4 h-3 bg-accentGreen rounded shadow-sm shadow-accentGreen/50"></div>
-                <div class="w-4 h-3 bg-slate-700 rounded opacity-40"></div>
-              </div>
-              <div class="text-[9px] text-slate-300">40%-80% Depth &middot; Mid 35%-65% Width</div>
-            </div>
-
-            <!-- Recliner Row -->
-            <div class="flex justify-center space-x-1 text-slate-300">
-              <div class="px-2 py-0.5 bg-brand/30 border border-brand/50 rounded text-brand font-bold text-[9px]">
-                Row P &middot; Recliner / Club Tier
-              </div>
-            </div>
+        <!-- Channel Up / Down & Guide Rockers -->
+        <div class="flex items-center justify-center space-x-4 mb-5">
+          <!-- Channel Rocker -->
+          <div class="flex flex-col space-y-1.5">
+            <button onclick="channelStep(1)" class="btn-remote w-14 h-9 rounded-t-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center">
+              <i class="fa-solid fa-chevron-up"></i>
+            </button>
+            <div class="text-[9px] text-center font-mono font-bold text-slate-400 uppercase py-0.5">CH</div>
+            <button onclick="channelStep(-1)" class="btn-remote w-14 h-9 rounded-b-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center">
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
           </div>
 
-          <p class="text-[11px] text-slate-400 mt-3 text-left">
-            The algorithm filters out front rows A–D and detects adjacent openings in the optical/acoustic center.
-          </p>
+          <!-- D-Pad Center Wheel -->
+          <div class="w-24 h-24 rounded-full bg-slate-800 border-2 border-slate-700 relative flex items-center justify-center shadow-inner">
+            <button onclick="channelStep(-1)" class="absolute top-1 text-slate-400 hover:text-white text-xs p-1"><i class="fa-solid fa-caret-up"></i></button>
+            <button onclick="channelStep(1)" class="absolute bottom-1 text-slate-400 hover:text-white text-xs p-1"><i class="fa-solid fa-caret-down"></i></button>
+            <button onclick="channelStep(-1)" class="absolute left-1.5 text-slate-400 hover:text-white text-xs p-1"><i class="fa-solid fa-caret-left"></i></button>
+            <button onclick="channelStep(1)" class="absolute right-1.5 text-slate-400 hover:text-white text-xs p-1"><i class="fa-solid fa-caret-right"></i></button>
+            
+            <button onclick="handleRemoteOk()" class="btn-remote w-10 h-10 rounded-full bg-brand text-white font-black text-[11px] shadow-md flex items-center justify-center">
+              OK
+            </button>
+          </div>
         </div>
+
+        <!-- 4-Color Teletext Macro Buttons -->
+        <div class="grid grid-cols-4 gap-2 mb-4 px-1">
+          <!-- Red Button: Scan -->
+          <button onclick="handleRemoteColor('red')" class="btn-remote h-8 rounded-lg bg-red-600 text-white text-[9px] font-black uppercase flex flex-col items-center justify-center hover:bg-red-500" title="Scan Ticket Availability">
+            <span>SCAN</span>
+          </button>
+          <!-- Green Button: New Watch -->
+          <button onclick="handleRemoteColor('green')" class="btn-remote h-8 rounded-lg bg-emerald-600 text-white text-[9px] font-black uppercase flex flex-col items-center justify-center hover:bg-emerald-500" title="Program New Watch">
+            <span>NEW</span>
+          </button>
+          <!-- Yellow Button: Sweet Spot Radar -->
+          <button onclick="handleRemoteColor('yellow')" class="btn-remote h-8 rounded-lg bg-amber-500 text-white text-[9px] font-black uppercase flex flex-col items-center justify-center hover:bg-amber-400" title="Sweet Spot Matrix">
+            <span>PRIME</span>
+          </button>
+          <!-- Blue Button: Account -->
+          <button onclick="handleRemoteColor('blue')" class="btn-remote h-8 rounded-lg bg-blue-600 text-white text-[9px] font-black uppercase flex flex-col items-center justify-center hover:bg-blue-500" title="Sign In / Account">
+            <span>USER</span>
+          </button>
+        </div>
+
+        <div class="text-center pt-1 border-t border-slate-800">
+          <span class="text-[8px] font-mono text-slate-500 uppercase tracking-widest">TACTILE CINE-DECK CONTROLLER</span>
+        </div>
+
       </div>
-
-      <!-- Active Watches List -->
-      <div class="bg-cardBg border border-borderCol rounded-xl p-5 shadow-xl">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-sm font-bold text-white flex items-center">
-            <i class="fa-solid fa-list-check text-brand mr-2"></i> Active Watches
-          </h3>
-          <span id="watchCountBadge" class="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">0</span>
-        </div>
-
-        <div id="watchesList" class="space-y-3">
-          <div class="text-center py-8 text-slate-500 text-xs">Loading watches...</div>
-        </div>
-      </div>
-
     </div>
 
-  </main>
+  </div>
 
   <!-- ========================================================================= -->
-  <!-- Supabase Auth Modal (Replicating evenly's OTP & Account System) -->
+  <!-- Supabase Auth Modal (Shared Project, bms_watch schema) -->
   <!-- ========================================================================= -->
   <div id="authModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm hidden">
-    <div class="bg-cardBg border border-borderCol rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+    <div class="bg-tvBezel border-2 border-slate-700 rounded-3xl w-full max-w-md p-6 shadow-2xl relative">
       <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition">
         <i class="fa-solid fa-xmark text-lg"></i>
       </button>
 
-      <!-- Modal Header -->
       <div class="mb-5">
         <span id="authBadge" class="text-[10px] font-mono tracking-wider uppercase font-bold text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded">SIGN IN</span>
-        <h3 id="authTitle" class="text-xl font-bold text-white mt-1">Evenly &middot; BMS Watch</h3>
-        <p id="authSubtitle" class="text-xs text-slate-400 mt-1">Shared account login with 6-digit email verification.</p>
+        <h3 id="authTitle" class="text-xl font-bold text-white mt-1">CineVision &middot; Supabase Auth</h3>
+        <p id="authSubtitle" class="text-xs text-slate-400 mt-1">Shared account login with 6-digit email OTP.</p>
       </div>
 
-      <!-- Notice Alert -->
       <div id="authNotice" class="hidden mb-4 p-3 rounded-lg text-xs leading-relaxed"></div>
 
-      <!-- Auth Form -->
       <form id="authForm" onsubmit="handleAuthSubmit(event)" class="space-y-4">
-        
-        <!-- Name (Sign-up only) -->
         <div id="authNameField" class="hidden">
           <label class="block text-xs font-semibold text-slate-300 mb-1">Your Name</label>
-          <input type="text" id="authName" placeholder="How you want to be called" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+          <input type="text" id="authName" placeholder="Name" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
         </div>
 
-        <!-- Email (All modes) -->
         <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">Email</label>
-          <input type="email" id="authEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
+          <input type="email" id="authEmail" required placeholder="name@example.com" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
         </div>
 
-        <!-- 6-Digit OTP Code (Verify & Reset modes) -->
         <div id="authCodeField" class="hidden">
           <label class="block text-xs font-semibold text-accentGold mb-1">6-Digit Code from Email</label>
           <input type="text" id="authCode" inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10" placeholder="000000" class="w-full bg-slate-900 border border-accentGold/60 rounded-lg px-3 py-2 text-center text-lg font-mono tracking-[0.4em] font-bold text-white focus:outline-none focus:border-accentGold">
           <p class="text-[11px] text-slate-400 mt-1">Check your inbox and spam folder for the code.</p>
         </div>
 
-        <!-- Password (Sign-in, Sign-up, Reset) -->
         <div id="authPasswordField">
           <label id="authPasswordLabel" class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
-          <input type="password" id="authPassword" minlength="8" placeholder="••••••••" class="w-full bg-slate-900 border border-borderCol rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
-          <span id="authPasswordHint" class="text-[11px] text-slate-500 mt-1 block">At least 8 characters.</span>
+          <input type="password" id="authPassword" minlength="8" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand">
         </div>
 
         <button type="submit" id="authSubmitBtn" class="w-full py-2.5 rounded-lg bg-brand hover:bg-brandHover text-white font-bold text-sm shadow-lg shadow-brand/20 transition flex items-center justify-center space-x-2">
@@ -311,15 +505,13 @@
         </button>
       </form>
 
-      <!-- Resend Code Button (Verify / Reset modes) -->
       <button id="authResendBtn" type="button" onclick="handleResendCode()" class="hidden w-full mt-2 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition">
         Send a new code
       </button>
 
-      <hr class="border-borderCol my-4">
+      <hr class="border-slate-800 my-4">
 
-      <!-- Navigation Mode Switches (Matching evenly) -->
-      <div id="authNavButtons" class="space-y-1.5 text-center text-xs">
+      <div class="space-y-1.5 text-center text-xs">
         <button type="button" id="btnGoOtpDirect" onclick="switchAuthMode('otp-direct')" class="text-brand hover:underline block w-full py-1">
           <i class="fa-solid fa-envelope-open-text mr-1"></i> Sign in with 6-digit email code (Passwordless OTP)
         </button>
@@ -346,24 +538,241 @@
   <script>
     let supabaseClient = null;
     let currentSession = null;
+    let currentChannel = 1;
     let selectedFormats = new Set();
+    let currentCity = { code: 'COIM', slug: 'coimbatore', name: 'Coimbatore' };
     let regionsList = [];
-    
-    // Auth state machine: 'sign-in' | 'sign-up' | 'verify' | 'forgot' | 'reset' | 'otp-direct'
+
+    // Auth state machine
     let authMode = 'sign-in';
     let authCooldown = 0;
     let cooldownTimer = null;
 
+    const CHANNEL_NAMES = {
+      1: "CH 01 \u00b7 NOW SHOWING",
+      2: "CH 02 \u00b7 COMING SOON",
+      3: "CH 03 \u00b7 WATCH RADAR",
+      4: "CH 04 \u00b7 SWEET SPOT MATRIX",
+      5: "CH 05 \u00b7 WATCH PROGRAMMER"
+    };
+
     async function init() {
+      startClock();
       await initSupabase();
       await loadRegions();
       await loadFormats();
-      await loadPreRelease();
+      await fetchLiveBMSMovies('movies');
+      await fetchLiveBMSMovies('upcoming');
       await loadWatches();
     }
 
+    function startClock() {
+      const el = document.getElementById('osdClock');
+      function update() {
+        const d = new Date();
+        el.innerText = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      update();
+      setInterval(update, 1000);
+    }
+
     // -------------------------------------------------------------------------
-    // Supabase Initialization & Auth Listener (Matching evenly)
+    // Channel Switching Engine (TV Remote Simulation)
+    // -------------------------------------------------------------------------
+    function switchChannel(chNumber) {
+      flashRemoteIr();
+      if (chNumber < 1) chNumber = 5;
+      if (chNumber > 5) chNumber = 1;
+      currentChannel = chNumber;
+
+      // Update OSD
+      const badge = document.getElementById('osdChannelBadge');
+      badge.innerText = CHANNEL_NAMES[chNumber] || `CH 0${chNumber}`;
+
+      // TV Screen Transition
+      const screen = document.getElementById('tvScreen');
+      screen.classList.remove('channel-flicker');
+      void screen.offsetWidth; // trigger reflow
+      screen.classList.add('channel-flicker');
+
+      // Hide all channels, show selected
+      for (let i = 1; i <= 5; i++) {
+        const el = document.getElementById(`channel_${i}`);
+        if (el) el.classList.toggle('hidden', i !== chNumber);
+      }
+    }
+
+    function channelStep(delta) {
+      switchChannel(currentChannel + delta);
+    }
+
+    function flashRemoteIr() {
+      const led = document.getElementById('remoteIrLed');
+      led.classList.remove('opacity-20');
+      led.classList.add('opacity-100', 'shadow-lg', 'shadow-red-500');
+      setTimeout(() => {
+        led.classList.remove('opacity-100', 'shadow-lg', 'shadow-red-500');
+        led.classList.add('opacity-20');
+      }, 150);
+    }
+
+    function handleRemoteButton(action) {
+      flashRemoteIr();
+      if (action === 'power') {
+        const led = document.getElementById('tvStandbyLed');
+        const screen = document.getElementById('tvScreen');
+        if (screen.classList.contains('opacity-0')) {
+          screen.classList.remove('opacity-0');
+          led.className = 'w-2.5 h-2.5 rounded-full bg-accentGreen shadow-lg shadow-accentGreen/50 animate-pulse';
+          showToast('CineVision TV: Powered ON');
+        } else {
+          screen.classList.add('opacity-0');
+          led.className = 'w-2.5 h-2.5 rounded-full bg-red-600 shadow-lg shadow-red-600/50';
+          showToast('CineVision TV: Standby Mode');
+        }
+      } else if (action === 'input') {
+        const sel = document.getElementById('tunerCitySelect');
+        sel.focus();
+      }
+    }
+
+    function handleRemoteColor(color) {
+      flashRemoteIr();
+      if (color === 'red') {
+        triggerManualCheck();
+      } else if (color === 'green') {
+        switchChannel(5); // Watch builder
+      } else if (color === 'yellow') {
+        switchChannel(4); // Sweet spot radar
+      } else if (color === 'blue') {
+        openAuthModal(currentSession ? 'sign-in' : 'sign-in');
+      }
+    }
+
+    function handleRemoteOk() {
+      flashRemoteIr();
+      if (currentChannel === 1 || currentChannel === 2) {
+        switchChannel(5);
+      } else if (currentChannel === 5) {
+        document.getElementById('watchProgrammerForm').requestSubmit();
+      } else {
+        triggerManualCheck();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Real BookMyShow API Fetchers
+    // -------------------------------------------------------------------------
+    async function loadRegions() {
+      try {
+        const res = await fetch('/api/regions');
+        regionsList = await res.json();
+        const sel = document.getElementById('tunerCitySelect');
+        sel.innerHTML = regionsList.map(r => `
+          <option value="${r.code}" data-slug="${r.slug}" ${r.code === 'COIM' ? 'selected' : ''}>
+            ${r.name} (${r.code})
+          </option>
+        `).join('');
+      } catch (err) {
+        console.error('Failed loading regions:', err);
+      }
+    }
+
+    async function handleTunerCityChange() {
+      const sel = document.getElementById('tunerCitySelect');
+      const opt = sel.selectedOptions[0];
+      currentCity = {
+        code: sel.value,
+        slug: opt.getAttribute('data-slug') || sel.value.toLowerCase(),
+        name: opt.text.split(' (')[0]
+      };
+      document.getElementById('osdCityBadge').innerHTML = `<i class="fa-solid fa-location-dot text-brand mr-1"></i>${currentCity.name.toUpperCase()}`;
+      showToast(`Tuning cable broadcast to ${currentCity.name}...`);
+      await fetchLiveBMSMovies('movies');
+      await fetchLiveBMSMovies('upcoming');
+    }
+
+    async function fetchLiveBMSMovies(type = 'movies') {
+      const containerId = type === 'upcoming' ? 'upcomingMoviesGrid' : 'runningMoviesGrid';
+      const container = document.getElementById(containerId);
+      container.innerHTML = `<div class="col-span-full text-center py-10 text-slate-500 font-mono text-xs"><i class="fa-solid fa-spinner fa-spin text-brand text-lg mb-2 block"></i>Receiving BookMyShow ${type} satellite stream...</div>`;
+
+      try {
+        const res = await fetch(`/api/bms/movies?region=${currentCity.code}&slug=${currentCity.slug}&type=${type}`);
+        const movies = await res.json();
+
+        if (!movies.length) {
+          container.innerHTML = `<div class="col-span-full text-center py-8 text-slate-500 text-xs">No ${type} broadcast signal in this city.</div>`;
+          return;
+        }
+
+        container.innerHTML = movies.map(m => `
+          <div class="group bg-slate-900 border border-slate-800 hover:border-brand rounded-xl overflow-hidden transition shadow-lg flex flex-col justify-between">
+            <div class="relative overflow-hidden aspect-[2/3] bg-slate-950">
+              <img src="${m.image}" alt="${m.name}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+              <div class="absolute top-2 right-2 bg-black/80 backdrop-blur px-1.5 py-0.5 rounded text-[9px] font-mono font-bold text-white border border-slate-700">
+                ${m.event_code || 'BMS'}
+              </div>
+            </div>
+            <div class="p-2.5">
+              <h3 class="text-xs font-bold text-white truncate" title="${m.name}">${m.name}</h3>
+              <button onclick="tuneToMovieWatch('${m.name}', '${m.event_code}', '${m.slug}')" class="mt-2 w-full py-1.5 rounded-lg bg-brand hover:bg-brandHover text-white text-[10px] font-bold uppercase tracking-wider transition flex items-center justify-center space-x-1 shadow">
+                <i class="fa-solid fa-satellite-dish text-[9px]"></i>
+                <span>TUNE WATCH</span>
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="col-span-full text-center py-8 text-red-400 text-xs">Failed receiving satellite signal from BMS API.</div>`;
+      }
+    }
+
+    function tuneToMovieWatch(title, eventCode, slug) {
+      document.getElementById('progTitle').value = title;
+      document.getElementById('progEventCode').value = eventCode;
+      switchChannel(5); // Jump to Watch Builder
+      showToast(`Tuned into "${title}"! Set dates and confirm watch.`);
+    }
+
+    async function loadFormats() {
+      const res = await fetch('/api/formats');
+      const formats = await res.json();
+      const container = document.getElementById('progFormatPills');
+      container.innerHTML = formats.map(f => `
+        <button type="button" onclick="toggleFormat('${f}', this)" class="px-2.5 py-1 rounded text-xs border border-slate-700 bg-slate-900 hover:border-slate-500 transition text-slate-300 font-medium">
+          ${f}
+        </button>
+      `).join('');
+    }
+
+    function toggleFormat(f, btn) {
+      if (selectedFormats.has(f)) {
+        selectedFormats.delete(f);
+        btn.classList.remove('bg-brand', 'text-white', 'border-brand');
+        btn.classList.add('bg-slate-900', 'text-slate-300');
+      } else {
+        selectedFormats.add(f);
+        btn.classList.add('bg-brand', 'text-white', 'border-brand');
+        btn.classList.remove('bg-slate-900', 'text-slate-300');
+      }
+    }
+
+    function setDatesPreset(preset) {
+      const field = document.getElementById('progDates');
+      const today = new Date();
+      const fmt = d => d.toISOString().slice(0, 10).replace(/-/g, '');
+      if (preset === 'weekend') {
+        const d1 = new Date(today); d1.setDate(today.getDate() + 1);
+        const d2 = new Date(today); d2.setDate(today.getDate() + 2);
+        field.value = `${fmt(today)}, ${fmt(d1)}, ${fmt(d2)}`;
+      } else if (preset === 'doomsday') {
+        field.value = '20261217, 20261218, 20261219, 20261220, 20261221';
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Supabase Auth & Session Management (bms_watch schema)
     // -------------------------------------------------------------------------
     async function initSupabase() {
       try {
@@ -373,58 +782,49 @@
         const key = cfg.supabase_anon_key || '';
         
         if (window.supabase && url && key) {
-          // Dedicated bms_watch schema matching evenly's schema isolation pattern
           supabaseClient = window.supabase.createClient(url, key, {
             db: { schema: 'bms_watch' }
           });
-          
-          // Check active session
           const { data } = await supabaseClient.auth.getSession();
           setAuthSession(data.session);
 
-          // Listen for auth changes
           supabaseClient.auth.onAuthStateChange((_event, session) => {
             setAuthSession(session);
           });
         }
       } catch (err) {
-        console.warn('Supabase initialization fallback:', err);
+        console.warn('Supabase init fallback:', err);
       }
     }
 
     function setAuthSession(session) {
       currentSession = session;
       const nav = document.getElementById('authNavArea');
-      const emailInput = document.getElementById('userEmail');
-      const emailHint = document.getElementById('emailHint');
+      const emailInput = document.getElementById('progEmail');
 
       if (session && session.user) {
         const email = session.user.email;
         const name = session.user.user_metadata?.name || email.split('@')[0];
         nav.innerHTML = `
           <div class="flex items-center space-x-2">
-            <span class="text-xs text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded font-mono truncate max-w-[140px]" title="${email}">
+            <span class="text-xs text-slate-300 bg-slate-900 border border-slate-700 px-2.5 py-1 rounded font-mono truncate max-w-[140px]">
               <i class="fa-solid fa-user-check text-accentGreen mr-1"></i>${name}
             </span>
-            <button onclick="handleSignOut()" class="text-xs text-slate-400 hover:text-white px-2 py-1 transition">
+            <button onclick="handleSignOut()" class="text-xs text-slate-400 hover:text-white px-2 py-1">
               Sign out
             </button>
           </div>
         `;
         emailInput.value = email;
         emailInput.readOnly = true;
-        emailInput.classList.add('opacity-80', 'cursor-not-allowed');
-        emailHint.innerHTML = `<span class="text-accentGreen"><i class="fa-solid fa-circle-check mr-1"></i>Linked to your Evenly/Supabase account (${email})</span>`;
       } else {
         nav.innerHTML = `
-          <button onclick="openAuthModal('sign-in')" class="px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brandHover text-xs font-bold text-white shadow-lg shadow-brand/20 transition flex items-center space-x-1.5">
+          <button onclick="openAuthModal('sign-in')" class="px-3.5 py-1.5 rounded-lg bg-brand hover:bg-brandHover text-xs font-bold text-white shadow transition flex items-center space-x-1.5">
             <i class="fa-solid fa-user"></i>
             <span>Sign In / OTP</span>
           </button>
         `;
         emailInput.readOnly = false;
-        emailInput.classList.remove('opacity-80', 'cursor-not-allowed');
-        emailHint.innerText = 'Sign in with OTP above to sync watches with your Evenly account.';
       }
       loadWatches();
     }
@@ -432,13 +832,10 @@
     async function handleSignOut() {
       if (supabaseClient) {
         await supabaseClient.auth.signOut();
-        showToast('Signed out successfully');
+        showToast('Signed out of CineVision');
       }
     }
 
-    // -------------------------------------------------------------------------
-    // Auth Modal State Transitions (Exactly matching evenly)
-    // -------------------------------------------------------------------------
     function openAuthModal(mode = 'sign-in') {
       document.getElementById('authModal').classList.remove('hidden');
       switchAuthMode(mode);
@@ -457,7 +854,6 @@
       const nameField = document.getElementById('authNameField');
       const codeField = document.getElementById('authCodeField');
       const passwordField = document.getElementById('authPasswordField');
-      const passwordLabel = document.getElementById('authPasswordLabel');
       const resendBtn = document.getElementById('authResendBtn');
       const emailInput = document.getElementById('authEmail');
 
@@ -466,7 +862,6 @@
       const btnGoForgot = document.getElementById('btnGoForgot');
       const btnGoSignIn = document.getElementById('btnGoSignIn');
 
-      // Reset notices
       setAuthNotice(message, false);
 
       const needsCode = mode === 'verify' || mode === 'reset';
@@ -478,7 +873,6 @@
       passwordField.classList.toggle('hidden', !needsPassword);
       resendBtn.classList.toggle('hidden', !needsCode);
 
-      // Mode toggles in footer
       btnGoSignIn.classList.toggle('hidden', mode === 'sign-in');
       btnGoSignUp.classList.toggle('hidden', mode === 'sign-up' || needsCode);
       btnGoForgot.classList.toggle('hidden', mode !== 'sign-in');
@@ -486,35 +880,24 @@
 
       if (mode === 'sign-in') {
         badge.innerText = 'SIGN IN';
-        title.innerText = 'Sign in to BMS Watch';
+        title.innerText = 'Sign in to CineVision';
         subtitle.innerText = 'Use your shared Evenly / Supabase account.';
         btnText.innerText = 'Sign In';
       } else if (mode === 'sign-up') {
         badge.innerText = 'SIGN UP';
         title.innerText = 'Create an account';
-        subtitle.innerText = 'A 6-digit confirmation code will be emailed to you.';
+        subtitle.innerText = 'A 6-digit confirmation code will be emailed.';
         btnText.innerText = 'Create account';
       } else if (mode === 'verify') {
-        badge.innerText = 'OTP VERIFICATION';
+        badge.innerText = 'OTP VERIFY';
         title.innerText = 'Check your email';
-        subtitle.innerText = `Enter the 6-digit verification code sent to ${emailInput.value}.`;
+        subtitle.innerText = `Enter the 6-digit code sent to ${emailInput.value}.`;
         btnText.innerText = 'Confirm Code';
         startCooldown(60);
-      } else if (mode === 'forgot') {
-        badge.innerText = 'PASSWORD RESET';
-        title.innerText = 'Reset your password';
-        subtitle.innerText = 'We will email you a 6-digit recovery code.';
-        btnText.innerText = 'Email me a code';
-      } else if (mode === 'reset') {
-        badge.innerText = 'SET NEW PASSWORD';
-        title.innerText = 'Enter code & new password';
-        subtitle.innerText = 'Enter the recovery code sent to your email.';
-        passwordLabel.innerText = 'New Password';
-        btnText.innerText = 'Save new password';
       } else if (mode === 'otp-direct') {
         badge.innerText = 'PASSWORDLESS OTP';
         title.innerText = 'Sign in with Email Code';
-        subtitle.innerText = 'No password needed! We will email you a one-time 6-digit code.';
+        subtitle.innerText = 'No password needed! We will email you a 6-digit code.';
         passwordField.classList.add('hidden');
         btnText.innerText = 'Send Sign-in Code';
       }
@@ -557,7 +940,7 @@
     async function handleAuthSubmit(e) {
       e.preventDefault();
       if (!supabaseClient) {
-        setAuthNotice('Supabase client not configured. Add SUPABASE_ANON_KEY to .env', true);
+        setAuthNotice('Supabase client not configured.', true);
         return;
       }
 
@@ -565,17 +948,13 @@
       const password = document.getElementById('authPassword').value;
       const name = document.getElementById('authName').value.trim();
       const code = document.getElementById('authCode').value.trim();
-      const submitBtn = document.getElementById('authSubmitBtn');
-
-      submitBtn.disabled = true;
-      submitBtn.classList.add('opacity-50');
 
       try {
         if (authMode === 'sign-in') {
           const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
           if (error) {
             if (error.code === 'email_not_confirmed' || error.message.includes('not confirmed')) {
-              switchAuthMode('verify', `Confirm your email first: enter the 6-digit code sent to ${email}`);
+              switchAuthMode('verify', `Confirm your email first: enter the code sent to ${email}`);
               return;
             }
             throw error;
@@ -583,7 +962,6 @@
           closeAuthModal();
           showToast(`Welcome back, ${email}!`);
         } else if (authMode === 'sign-up') {
-          // Exactly matching evenly's sign-up with app tag
           const { data, error } = await supabaseClient.auth.signUp({
             email,
             password,
@@ -597,54 +975,31 @@
             showToast('Account created!');
           }
         } else if (authMode === 'verify') {
-          // Exactly matching evenly: verifyOtp with type 'signup' or fallback 'email'
           let res = await supabaseClient.auth.verifyOtp({ email, token: code, type: 'signup' });
           if (res.error) {
             res = await supabaseClient.auth.verifyOtp({ email, token: code, type: 'email' });
           }
           if (res.error) throw res.error;
           closeAuthModal();
-          showToast('Email confirmed & signed in!');
+          showToast('Email verified and logged in!');
         } else if (authMode === 'otp-direct') {
-          // Passwordless email OTP
           const { error } = await supabaseClient.auth.signInWithOtp({
             email,
             options: { data: { app: 'bms_watch' } }
           });
           if (error) throw error;
           switchAuthMode('verify', `A one-time 6-digit code has been sent to ${email}.`);
-        } else if (authMode === 'forgot') {
-          const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
-          if (error) throw error;
-          switchAuthMode('reset', `If ${email} has an account, a 6-digit code is on its way.`);
-        } else if (authMode === 'reset') {
-          const { error: otpError } = await supabaseClient.auth.verifyOtp({ email, token: code, type: 'recovery' });
-          if (otpError) throw otpError;
-          const { error: pwError } = await supabaseClient.auth.updateUser({ password });
-          if (pwError) throw pwError;
-          closeAuthModal();
-          showToast('New password saved!');
         }
       } catch (err) {
-        setAuthNotice(err.message || 'Authentication failed', true);
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.classList.remove('opacity-50');
+        setAuthNotice(err.message || 'Authentication error', true);
       }
     }
 
     async function handleResendCode() {
       const email = document.getElementById('authEmail').value.trim();
       try {
-        let error = null;
-        if (authMode === 'verify') {
-          const res = await supabaseClient.auth.resend({ type: 'signup', email });
-          error = res.error;
-        } else {
-          const res = await supabaseClient.auth.resetPasswordForEmail(email);
-          error = res.error;
-        }
-        if (error) throw error;
+        const res = await supabaseClient.auth.resend({ type: 'signup', email });
+        if (res.error) throw res.error;
         setAuthNotice(`A fresh 6-digit code was sent to ${email}.`, false);
         startCooldown(60);
       } catch (err) {
@@ -653,70 +1008,8 @@
     }
 
     // -------------------------------------------------------------------------
-    // Standard App Data & Watches
+    // Active Watches & Programmer Submit
     // -------------------------------------------------------------------------
-    async function loadRegions() {
-      const res = await fetch('/api/regions');
-      regionsList = await res.json();
-      const sel = document.getElementById('regionSelect');
-      sel.innerHTML = regionsList.map(r => `<option value="${r.code}" data-slug="${r.slug}">${r.name} (${r.code})</option>`).join('');
-    }
-
-    async function loadFormats() {
-      const res = await fetch('/api/formats');
-      const formats = await res.json();
-      const container = document.getElementById('formatPills');
-      container.innerHTML = formats.map(f => `
-        <button type="button" onclick="toggleFormat('${f}', this)" class="px-2.5 py-1 rounded text-xs border border-borderCol bg-slate-900 hover:border-slate-500 transition text-slate-300 font-medium">
-          ${f}
-        </button>
-      `).join('');
-    }
-
-    function toggleFormat(f, btn) {
-      if (selectedFormats.has(f)) {
-        selectedFormats.delete(f);
-        btn.classList.remove('bg-brand', 'text-white', 'border-brand');
-        btn.classList.add('bg-slate-900', 'text-slate-300');
-      } else {
-        selectedFormats.add(f);
-        btn.classList.add('bg-brand', 'text-white', 'border-brand');
-        btn.classList.remove('bg-slate-900', 'text-slate-300');
-      }
-    }
-
-    async function loadPreRelease() {
-      const res = await fetch('/api/pre-release');
-      const movies = await res.json();
-      const grid = document.getElementById('preReleaseGrid');
-      grid.innerHTML = movies.map(m => `
-        <div onclick="selectPreReleaseMovie('${m.title}', '${m.event_code}', '${m.slug}')" class="cursor-pointer bg-slate-900/80 hover:bg-slate-800 border border-borderCol hover:border-brand rounded-lg p-3 transition text-left">
-          <div class="text-xs font-bold text-white truncate">${m.title}</div>
-          <div class="text-[10px] text-brand font-medium mt-0.5">${m.tag}</div>
-          <div class="text-[10px] text-slate-400 mt-2 font-mono"><i class="fa-regular fa-calendar mr-1"></i>${m.release_date}</div>
-        </div>
-      `).join('');
-    }
-
-    function selectPreReleaseMovie(title, code, slug) {
-      document.getElementById('movieTitle').value = title;
-      document.getElementById('eventCode').value = code;
-      showToast(`Selected "${title}"!`);
-    }
-
-    function addDatesPreset(preset) {
-      const field = document.getElementById('watchDates');
-      if (preset === 'dec_doomsday') {
-        field.value = '20261217, 20261218, 20261219, 20261220, 20261221';
-      } else if (preset === 'this_weekend') {
-        const today = new Date();
-        const d1 = new Date(today); d1.setDate(today.getDate() + 1);
-        const d2 = new Date(today); d2.setDate(today.getDate() + 2);
-        const fmt = d => d.toISOString().slice(0, 10).replace(/-/g, '');
-        field.value = `${fmt(today)}, ${fmt(d1)}, ${fmt(d2)}`;
-      }
-    }
-
     async function loadWatches() {
       let url = '/api/watches';
       if (currentSession && currentSession.user) {
@@ -725,30 +1018,29 @@
 
       const res = await fetch(url);
       const watches = await res.json();
-      document.getElementById('watchCountBadge').innerText = watches.length;
-      const list = document.getElementById('watchesList');
+      const list = document.getElementById('watchesChannelList');
 
       if (!watches.length) {
-        list.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs">No active watches. Create one above!</div>`;
+        list.innerHTML = `<div class="text-center py-10 text-slate-500 font-mono text-xs">No active ticket watches tuned in. Use Channel 1 or Channel 5 to set one!</div>`;
         return;
       }
 
       list.innerHTML = watches.map(w => {
         const activeClass = w.is_active ? 'bg-accentGreen/10 text-accentGreen border-accentGreen/30' : 'bg-slate-800 text-slate-400 border-slate-700';
-        const activeLabel = w.is_active ? 'ACTIVE' : 'PAUSED';
+        const activeLabel = w.is_active ? 'TRANSMITTING' : 'PAUSED';
         const primeBadge = w.prime_seats_only ? `<span class="bg-accentGold/20 text-accentGold border border-accentGold/40 px-1.5 py-0.5 rounded text-[10px]"><i class="fa-solid fa-crown mr-1"></i>Prime Seats</span>` : '';
         const formatsBadges = w.formats.map(f => `<span class="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded text-[10px]">${f}</span>`).join(' ');
 
         return `
-        <div class="p-3.5 rounded-lg bg-slate-900 border border-borderCol hover:border-slate-700 transition">
+        <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-start justify-between">
             <div>
-              <div class="font-bold text-sm text-white flex items-center space-x-2">
+              <div class="font-bold text-xs sm:text-sm text-white flex items-center space-x-2">
                 <span>${w.movie_title}</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border ${activeClass}">${activeLabel}</span>
+                <span class="text-[9px] font-mono px-1.5 py-0.5 rounded border ${activeClass}">${activeLabel}</span>
               </div>
-              <div class="text-xs text-slate-400 mt-0.5">
-                ${w.region_slug.toUpperCase()} &middot; ${w.dates.length} date(s) watched
+              <div class="text-[11px] text-slate-400 mt-0.5">
+                ${w.region_slug.toUpperCase()} &middot; ${w.dates.length} date(s) monitored
               </div>
             </div>
             <div class="flex items-center space-x-1">
@@ -760,8 +1052,7 @@
               </button>
             </div>
           </div>
-
-          <div class="mt-2.5 flex flex-wrap gap-1.5 items-center">
+          <div class="mt-2 flex flex-wrap gap-1.5 items-center">
             ${primeBadge}
             ${formatsBadges}
             <span class="text-[10px] text-slate-500 font-mono"><i class="fa-regular fa-envelope mr-1"></i>${w.email}</span>
@@ -771,27 +1062,24 @@
       }).join('');
     }
 
-    async function handleCreateWatch(e) {
+    async function handleProgrammerSubmit(e) {
       e.preventDefault();
-      const regionEl = document.getElementById('regionSelect');
-      const regionCode = regionEl.value;
-      const regionSlug = regionEl.selectedOptions[0].getAttribute('data-slug');
-      const datesRaw = document.getElementById('watchDates').value;
+      const datesRaw = document.getElementById('progDates').value;
       const dates = datesRaw.split(',').map(s => s.trim().replace(/-/g, '')).filter(Boolean);
-      const cinemasRaw = document.getElementById('cinemaFilter').value;
+      const cinemasRaw = document.getElementById('progCinemas').value;
       const cinemas = cinemasRaw.split(',').map(s => s.trim()).filter(Boolean);
 
       const payload = {
-        movie_title: document.getElementById('movieTitle').value,
-        event_code: document.getElementById('eventCode').value,
-        region_code: regionCode,
-        region_slug: regionSlug,
+        movie_title: document.getElementById('progTitle').value,
+        event_code: document.getElementById('progEventCode').value,
+        region_code: currentCity.code,
+        region_slug: currentCity.slug,
         dates: dates,
         cinemas: cinemas,
         formats: Array.from(selectedFormats),
-        prime_seats_only: document.getElementById('primeSeatsToggle').checked,
-        min_seats_together: parseInt(document.getElementById('minSeats').value),
-        email: document.getElementById('userEmail').value,
+        prime_seats_only: document.getElementById('progPrimeToggle').checked,
+        min_seats_together: 2,
+        email: document.getElementById('progEmail').value,
         user_id: currentSession?.user?.id || null
       };
 
@@ -802,14 +1090,15 @@
           body: JSON.stringify(payload)
         });
         if (res.ok) {
-          showToast('Watch created successfully!');
+          showToast('Watch programmed successfully!');
+          switchChannel(3); // Jump to active watches
           await loadWatches();
         } else {
           const err = await res.json();
-          showToast(err.error || 'Failed to create watch', true);
+          showToast(err.error || 'Failed to program watch', true);
         }
       } catch (err) {
-        showToast('Network error creating watch', true);
+        showToast('Network error programming watch', true);
       }
     }
 
@@ -826,17 +1115,15 @@
     }
 
     async function triggerManualCheck() {
-      const icon = document.getElementById('checkIcon');
-      icon.classList.add('fa-spin');
+      flashRemoteIr();
+      showToast('Scanning BookMyShow satellite feeds...');
       try {
         const res = await fetch('/api/check-now', { method: 'POST' });
         const data = await res.json();
-        showToast(`Checked ${data.watches_checked} watch(es)! ${data.total_changes} new change(s).`);
+        showToast(`Scan complete: ${data.watches_checked} watch(es), ${data.total_changes} new change(s).`);
         await loadWatches();
       } catch (err) {
-        showToast('Check cycle failed', true);
-      } finally {
-        icon.classList.remove('fa-spin');
+        showToast('Scan cycle failed', true);
       }
     }
 

@@ -64,6 +64,83 @@ POPULAR_FORMATS = ["IMAX 3D", "IMAX 2D", "EPIQ", "PXL", "ICE", "4DX", "ScreenX",
 
 log = logging.getLogger("bms_watch.core")
 
+_CACHE_REGIONS = None
+_CACHE_MOVIES = {}
+
+
+def get_bms_regions() -> list[dict]:
+    global _CACHE_REGIONS
+    if _CACHE_REGIONS:
+        return _CACHE_REGIONS
+    try:
+        req = urllib.request.Request("https://in.bookmyshow.com/api/explore/v1/discover/regions", headers=BMS_HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            d = json.load(r)
+        bms = d.get("BookMyShow", {})
+        top = bms.get("TopCities", [])
+        top_cities = []
+        for c in top:
+            top_cities.append({
+                "code": c.get("RegionCode"),
+                "name": c.get("RegionName"),
+                "slug": c.get("RegionSlug"),
+                "image": c.get("Image", {}).get("Selected") or c.get("Image", {}).get("NotSelected")
+            })
+        if top_cities:
+            _CACHE_REGIONS = top_cities
+            return top_cities
+    except Exception:
+        log.exception("Failed fetching live BMS regions, using fallback list")
+    return POPULAR_REGIONS
+
+
+def get_bms_movies(region_code: str = "COIM", region_slug: str = "coimbatore", explore_type: str = "movies") -> list[dict]:
+    cache_key = (region_code, explore_type)
+    now = time.time()
+    if cache_key in _CACHE_MOVIES:
+        ts, data = _CACHE_MOVIES[cache_key]
+        if now - ts < 600:
+            return data
+
+    import uuid
+    headers = dict(BMS_HEADERS)
+    headers["x-region-code"] = region_code
+    headers["x-region-slug"] = region_slug
+    headers["x-bms-id"] = str(uuid.uuid4())
+
+    exp = "upcoming-movies" if explore_type in ("upcoming", "upcoming-movies") else "movies"
+    params = urllib.parse.urlencode({
+        "exploreType": exp,
+        "regionCode": region_code,
+        "regionSlug": region_slug
+    })
+    url = f"https://in.bookmyshow.com/api/explore/v1/discover/movies?{params}"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            d = json.load(r)
+        items = d.get("meta", {}).get("ldSchema", {}).get("itemListSchema", {}).get("itemListElement", [])
+        movies = []
+        for it in items:
+            u = it.get("url", "")
+            parts = u.rstrip("/").split("/")
+            code = parts[-1] if parts and parts[-1].startswith("ET") else ""
+            slug = parts[-2] if len(parts) >= 2 else ""
+            movies.append({
+                "name": it.get("name"),
+                "image": it.get("image"),
+                "url": u,
+                "event_code": code,
+                "slug": slug,
+                "type": explore_type
+            })
+        if movies:
+            _CACHE_MOVIES[cache_key] = (now, movies)
+            return movies
+    except Exception:
+        log.exception("Failed fetching live BMS movies for %s (%s)", region_code, explore_type)
+    return []
+
 
 # ---------------------------------------------------------------------------
 # Database Management

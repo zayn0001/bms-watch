@@ -16,6 +16,8 @@ from bms_core import (
     POPULAR_FORMATS,
     POPULAR_REGIONS,
     ROOT_DIR,
+    get_bms_movies,
+    get_bms_regions,
     get_db,
     init_db,
     run_check_cycle,
@@ -97,9 +99,18 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             res = run_check_cycle()
             return self._json(200, res)
 
-        # Reference data
+        # Dynamic BMS Regions
         if path == "/api/regions":
-            return self._json(200, POPULAR_REGIONS)
+            return self._json(200, get_bms_regions())
+
+        # Dynamic BMS Live Movies (Running or Upcoming)
+        if path == "/api/bms/movies":
+            qs = urllib.parse.parse_qs(url.query)
+            region = qs.get("region", ["COIM"])[0].upper()
+            slug = qs.get("slug", ["coimbatore"])[0].lower()
+            mtype = qs.get("type", ["movies"])[0].lower()
+            movies = get_bms_movies(region, slug, mtype)
+            return self._json(200, movies)
 
         if path == "/api/formats":
             return self._json(200, POPULAR_FORMATS)
