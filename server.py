@@ -141,6 +141,17 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                 logs = [dict(row) for row in conn.execute("SELECT * FROM alert_logs ORDER BY id DESC LIMIT 50").fetchall()]
             return self._json(200, logs)
 
+        # Serve login / sign-in page
+        if path in ("/login", "/login.html", "/sign-in", "/sign-in.html"):
+            login_path = STATIC_DIR / "login.html"
+            if login_path.exists():
+                content = login_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                return self.wfile.write(content)
+
         # Serve static UI (index.html fallback for root or missing paths)
         if path in ("/", "/index.html"):
             index_path = STATIC_DIR / "index.html"

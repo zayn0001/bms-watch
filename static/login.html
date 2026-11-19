@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in · BMS Watch</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 16Q16 2 30 16Q16 30 2 16Z' fill='%23f3efe6'/><circle cx='16' cy='16' r='7' fill='%23e39a3b'/><circle cx='16' cy='16' r='3.2' fill='%23000'/></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            night: '#0b0a10', lid: '#14121b', lash: '#24212e',
+            iris: '#e39a3b', irisDeep: '#a45c1a', lens: '#5fc9bf', sclera: '#f3efe6',
+          },
+          fontFamily: { display: ['Fraunces', 'serif'], sans: ['Inter', 'system-ui', 'sans-serif'] },
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background: radial-gradient(1200px 600px at 50% -200px, #1c1724 0%, #0b0a10 60%) #0b0a10;
+      color: #e7e3ec;
+    }
+    .lid-top, .lid-bot { transition: transform 110ms ease-in; }
+    .blink .lid-top { transform: translateY(15px); }
+    .blink .lid-bot { transform: translateY(-15px); }
+
+    .card { background: #14121b; border: 1px solid #24212e; border-radius: 20px; }
+    .field { width: 100%; background: #0b0a10; border: 1px solid #2d2a38; border-radius: 12px; padding: .75rem 1rem; font-size: .95rem; color: #fff; transition: border-color .15s, box-shadow .15s; }
+    .field:focus { outline: none; border-color: #e39a3b; box-shadow: 0 0 0 3px rgba(227,154,59,.18); }
+    .label { display: block; font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #8d879a; margin-bottom: .4rem; }
+    .btn-primary { background: #e39a3b; color: #0b0a10; font-weight: 700; border-radius: 12px; transition: background .15s, opacity .15s; }
+    .btn-primary:hover:not(:disabled) { background: #f0ac52; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-ghost { border: 1px solid #2d2a38; color: #cfc9d8; border-radius: 12px; transition: border-color .15s, color .15s; }
+    .btn-ghost:hover:not(:disabled) { border-color: #e39a3b; color: #fff; }
+    .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body class="min-h-screen font-sans flex flex-col justify-between p-4 selection:bg-iris selection:text-night">
+
+  <!-- Header -->
+  <header class="max-w-md mx-auto w-full pt-6 pb-4 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2.5 group" aria-label="BMS Watch home">
+      <svg class="blinker w-9 h-6" viewBox="0 0 48 30" aria-hidden="true">
+        <defs><clipPath id="logoClip"><path d="M2 15Q24 -3 46 15Q24 33 2 15Z"/></clipPath></defs>
+        <path d="M2 15Q24 -3 46 15Q24 33 2 15Z" fill="#f3efe6"/>
+        <g clip-path="url(#logoClip)">
+          <circle cx="24" cy="15" r="9" fill="#e39a3b"/><circle cx="24" cy="15" r="4" fill="#000"/><circle cx="26.5" cy="12.5" r="1.6" fill="#fff"/>
+          <rect class="lid-top" x="0" y="-15" width="48" height="15" fill="#0b0a10"/>
+          <rect class="lid-bot" x="0" y="30" width="48" height="15" fill="#0b0a10"/>
+        </g>
+      </svg>
+      <span class="font-display text-xl font-extrabold tracking-tight">BMS <span class="text-iris">Watch</span></span>
+    </a>
+    <a href="/" class="text-xs text-[#8d879a] hover:text-white transition flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i><span>Back</span></a>
+  </header>
+
+  <!-- Main Login Card -->
+  <main class="max-w-md mx-auto w-full my-auto py-6">
+    <div class="card p-6 sm:p-8 shadow-2xl relative">
+      <!-- Docket tag -->
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <span id="authDocket" class="text-[11px] tracking-[.18em] uppercase font-bold text-iris">Sign in</span>
+        <span class="text-[11px] text-[#8d879a]"><i class="fa-solid fa-shield-halved text-lens mr-1"></i>Passwordless</span>
+      </div>
+
+      <h1 id="authTitle" class="font-display text-3xl font-extrabold tracking-tight">Sign in</h1>
+      <p id="authSubtitle" class="text-sm text-[#a39db0] mt-1.5 mb-6">Enter your email to receive a 6-digit sign-in code. No password needed.</p>
+
+      <!-- Notice / Error banner -->
+      <div id="noticeBanner" class="hidden mb-5 p-3.5 rounded-xl text-xs leading-relaxed border transition-all"></div>
+
+      <!-- Mode 1: Email Form (Request OTP) -->
+      <form id="formEmail" onsubmit="handleSendOtp(event)" class="space-y-4">
+        <div>
+          <label class="label" for="inpEmail">Email address</label>
+          <input type="email" id="inpEmail" required autocomplete="email" placeholder="you@example.com" class="field" autofocus>
+        </div>
+        <button id="btnSendOtp" type="submit" class="btn-primary w-full py-3 text-sm flex items-center justify-center gap-2">
+          <i class="fa-solid fa-paper-plane text-xs"></i>
+          <span>Send sign-in code</span>
+        </button>
+      </form>
+
+      <!-- Mode 2: OTP Verification Form -->
+      <form id="formOtp" onsubmit="handleVerifyOtp(event)" class="hidden space-y-4">
+        <div>
+          <label class="label text-iris flex items-center justify-between" for="inpOtp">
+            <span>6-digit code</span>
+            <span class="text-[#8d879a] font-normal normal-case tracking-normal">Sent to <b id="otpEmailDisplay" class="text-sclera font-semibold"></b></span>
+          </label>
+          <input
+            type="text"
+            id="inpOtp"
+            inputmode="numeric"
+            pattern="[0-9]{6,10}"
+            maxlength="10"
+            required
+            autocomplete="one-time-code"
+            placeholder="000000"
+            class="field text-center text-2xl font-mono tracking-[.35em] font-bold text-sclera py-3"
+            oninput="handleOtpInput(this)"
+          >
+          <p class="text-[11px] text-[#8d879a] mt-1.5 flex items-center gap-1.5">
+            <i class="fa-regular fa-clock text-xs"></i>Check spam or promotions if you don't see it within a minute.
+          </p>
+        </div>
+        <button id="btnVerifyOtp" type="submit" class="btn-primary w-full py-3 text-sm flex items-center justify-center gap-2">
+          <i class="fa-solid fa-check text-xs"></i>
+          <span>Confirm code</span>
+        </button>
+        <div class="flex items-center justify-between gap-3 pt-2 text-xs">
+          <button id="btnResend" type="button" onclick="handleResendOtp()" class="btn-ghost flex-1 py-2 text-center">Send a new code</button>
+          <button type="button" onclick="switchToEmailStep()" class="text-[#8d879a] hover:text-white px-2 py-2 underline underline-offset-4">Change email</button>
+        </div>
+      </form>
+
+      <!-- Mode 3: Password Fallback Form -->
+      <form id="formPassword" onsubmit="handlePasswordLogin(event)" class="hidden space-y-4">
+        <div>
+          <label class="label" for="inpPwdEmail">Email address</label>
+          <input type="email" id="inpPwdEmail" required autocomplete="email" placeholder="you@example.com" class="field">
+        </div>
+        <div>
+          <label class="label" for="inpPassword">Password</label>
+          <input type="password" id="inpPassword" required minlength="8" autocomplete="current-password" placeholder="••••••••" class="field">
+        </div>
+        <button id="btnPasswordLogin" type="submit" class="btn-primary w-full py-3 text-sm flex items-center justify-center gap-2">
+          <i class="fa-solid fa-arrow-right-to-bracket text-xs"></i>
+          <span>Sign in</span>
+        </button>
+      </form>
+
+      <!-- Footnote toggles -->
+      <hr class="border-lash my-5">
+      <div id="footerLinks" class="text-center text-xs space-y-2">
+        <button id="togglePasswordMode" type="button" onclick="togglePasswordMode()" class="text-iris hover:underline">
+          Sign in with password instead
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="max-w-md mx-auto w-full pb-6 text-center text-xs text-[#8d879a]">
+    <p>BMS Watch · Keeping an eye on tickets so you don't refresh.</p>
+  </footer>
+
+  <script>
+    let supabaseClient = null;
+    let targetEmail = '';
+    let cooldownTimer = null;
+    let isPasswordMode = false;
+
+    const $ = id => document.getElementById(id);
+    const getParam = k => new URLSearchParams(window.location.search).get(k);
+    const redirectUrl = getParam('redirect') || '/';
+
+    // Blinking eye animation
+    function startBlink() {
+      const blink = () => {
+        document.querySelectorAll('.blinker').forEach(el => {
+          el.classList.add('blink');
+          setTimeout(() => el.classList.remove('blink'), 140);
+        });
+        setTimeout(blink, 2500 + Math.random() * 4500);
+      };
+      setTimeout(blink, 1500);
+    }
+
+    // Friendly error messaging (reference: Evenly)
+    function friendlyError(msg) {
+      if (!msg) return 'An error occurred. Please try again.';
+      if (/invalid login credentials/i.test(msg)) return 'That email and password do not match.';
+      if (/expired|invalid/i.test(msg) && /otp|token|code/i.test(msg)) return 'That code is wrong or has expired. Check the latest email, or send a new code.';
+      if (/rate limit|security purposes|too many/i.test(msg)) return 'Too many attempts just now. Wait a minute and try again.';
+      if (/network|fetch/i.test(msg)) return 'Could not reach authentication service. Please check your connection.';
+      return msg;
+    }
+
+    function showNotice(msg, isError = false) {
+      const b = $('noticeBanner');
+      if (!msg) {
+        b.classList.add('hidden');
+        return;
+      }
+      b.classList.remove('hidden');
+      b.className = `mb-5 p-3.5 rounded-xl text-xs leading-relaxed border transition-all ${
+        isError
+          ? 'bg-red-950/60 border-red-800 text-red-200'
+          : 'bg-teal-950/60 border-teal-800 text-teal-200'
+      }`;
+      b.innerHTML = isError
+        ? `<div class="flex items-start gap-2"><i class="fa-solid fa-triangle-exclamation text-sm text-red-400 mt-0.5 shrink-0"></i><span>${msg}</span></div>`
+        : `<div class="flex items-start gap-2"><i class="fa-solid fa-circle-check text-sm text-teal-400 mt-0.5 shrink-0"></i><span>${msg}</span></div>`;
+    }
+
+    async function init() {
+      startBlink();
+      try {
+        const cfg = await (await fetch('/api/config')).json();
+        if (window.supabase && cfg.supabase_url && cfg.supabase_anon_key) {
+          supabaseClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
+            db: { schema: 'bms_watch' }
+          });
+
+          // If already signed in, redirect home
+          const { data } = await supabaseClient.auth.getSession();
+          if (data?.session) {
+            showNotice('Already signed in. Taking you back…');
+            setTimeout(() => { window.location.replace(redirectUrl); }, 400);
+            return;
+          }
+        } else {
+          showNotice('Authentication is currently not configured on this server.', true);
+        }
+      } catch (err) {
+        showNotice('Failed to connect to authentication server.', true);
+      }
+    }
+
+    // Step 1: Send OTP
+    async function handleSendOtp(e) {
+      e.preventDefault();
+      const email = $('inpEmail').value.trim();
+      if (!email) return;
+      if (!supabaseClient) return showNotice('Authentication client not ready.', true);
+
+      targetEmail = email;
+      showNotice('');
+      const btn = $('btnSendOtp');
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Sending code…';
+
+      try {
+        const { error } = await supabaseClient.auth.signInWithOtp({
+          email,
+          options: { data: { app: 'bms_watch' } }
+        });
+        if (error) throw error;
+        switchToOtpStep();
+      } catch (err) {
+        showNotice(friendlyError(err.message), true);
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Send sign-in code';
+      }
+    }
+
+    function switchToOtpStep() {
+      $('formEmail').classList.add('hidden');
+      $('formPassword').classList.add('hidden');
+      $('formOtp').classList.remove('hidden');
+
+      $('authDocket').textContent = 'Check your email';
+      $('authTitle').textContent = 'Enter your code';
+      $('authSubtitle').innerHTML = `We sent a 6-digit code to <b class="text-sclera">${targetEmail}</b>.`;
+      $('otpEmailDisplay').textContent = targetEmail;
+
+      showNotice(`A 6-digit code was sent to ${targetEmail}.`);
+      $('inpOtp').value = '';
+      setTimeout(() => $('inpOtp').focus(), 100);
+      startCooldown(60);
+      $('togglePasswordMode').classList.add('hidden');
+    }
+
+    function switchToEmailStep() {
+      $('formOtp').classList.add('hidden');
+      $('formPassword').classList.add('hidden');
+      $('formEmail').classList.remove('hidden');
+
+      $('authDocket').textContent = 'Sign in';
+      $('authTitle').textContent = 'Sign in';
+      $('authSubtitle').textContent = 'Enter your email to receive a 6-digit sign-in code. No password needed.';
+
+      showNotice('');
+      $('inpEmail').focus();
+      $('togglePasswordMode').classList.remove('hidden');
+      $('togglePasswordMode').textContent = 'Sign in with password instead';
+      isPasswordMode = false;
+    }
+
+    // Auto-submit OTP when 6 numbers are typed or pasted
+    function handleOtpInput(input) {
+      input.value = input.value.replace(/\D/g, '');
+      if (input.value.length === 6) {
+        handleVerifyOtp(new Event('submit'));
+      }
+    }
+
+    // Step 2: Verify OTP
+    async function handleVerifyOtp(e) {
+      if (e) e.preventDefault();
+      const token = $('inpOtp').value.trim();
+      if (token.length < 6) return showNotice('Please enter the full 6-digit code.', true);
+      if (!supabaseClient) return showNotice('Authentication client not ready.', true);
+
+      showNotice('');
+      const btn = $('btnVerifyOtp');
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Verifying…';
+
+      try {
+        let res = await supabaseClient.auth.verifyOtp({
+          email: targetEmail,
+          token,
+          type: 'email'
+        });
+        if (res.error) {
+          res = await supabaseClient.auth.verifyOtp({
+            email: targetEmail,
+            token,
+            type: 'signup'
+          });
+        }
+        if (res.error) throw res.error;
+
+        showNotice('Code confirmed! Taking you in…');
+        setTimeout(() => { window.location.replace(redirectUrl); }, 500);
+      } catch (err) {
+        showNotice(friendlyError(err.message), true);
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Confirm code';
+      }
+    }
+
+    // Resend code with cooldown
+    async function handleResendOtp() {
+      if (!targetEmail || !supabaseClient) return;
+      showNotice('');
+      try {
+        const { error } = await supabaseClient.auth.signInWithOtp({
+          email: targetEmail,
+          options: { data: { app: 'bms_watch' } }
+        });
+        if (error) throw error;
+        showNotice(`A fresh 6-digit code was sent to ${targetEmail}.`);
+        startCooldown(60);
+      } catch (err) {
+        showNotice(friendlyError(err.message), true);
+      }
+    }
+
+    function startCooldown(sec) {
+      const btn = $('btnResend');
+      clearInterval(cooldownTimer);
+      btn.disabled = true;
+      const tick = () => {
+        btn.textContent = sec > 0 ? `Send a new code (${sec}s)` : 'Send a new code';
+        if (sec-- <= 0) {
+          clearInterval(cooldownTimer);
+          btn.disabled = false;
+        }
+      };
+      tick();
+      cooldownTimer = setInterval(tick, 1000);
+    }
+
+    // Password fallback
+    function togglePasswordMode() {
+      isPasswordMode = !isPasswordMode;
+      showNotice('');
+      if (isPasswordMode) {
+        $('formEmail').classList.add('hidden');
+        $('formOtp').classList.add('hidden');
+        $('formPassword').classList.remove('hidden');
+        $('authDocket').textContent = 'Password';
+        $('authTitle').textContent = 'Sign in with password';
+        $('authSubtitle').textContent = 'Use your existing password for Evenly / BMS Watch.';
+        $('togglePasswordMode').textContent = 'Email me a sign-in code instead';
+        $('inpPwdEmail').value = $('inpEmail').value;
+        $('inpPwdEmail').focus();
+      } else {
+        switchToEmailStep();
+      }
+    }
+
+    async function handlePasswordLogin(e) {
+      e.preventDefault();
+      const email = $('inpPwdEmail').value.trim();
+      const password = $('inpPassword').value;
+      if (!supabaseClient) return showNotice('Authentication client not ready.', true);
+
+      const btn = $('btnPasswordLogin');
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Signing in…';
+
+      try {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        showNotice('Welcome back! Taking you in…');
+        setTimeout(() => { window.location.replace(redirectUrl); }, 500);
+      } catch (err) {
+        showNotice(friendlyError(err.message), true);
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Sign in';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

@@ -20,6 +20,16 @@ from pathlib import Path
 
 # Base paths
 ROOT_DIR = Path(__file__).resolve().parent
+
+# Load local .env if present
+_env_path = ROOT_DIR / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 DATA_DIR = Path(os.getenv("DATA_DIR", ROOT_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "bms_watch.db"

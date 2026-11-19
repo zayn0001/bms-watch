@@ -765,7 +765,7 @@
         email.value = session.user.email;
         email.readOnly = true;
       } else {
-        nav.innerHTML = supabaseClient ? `<button onclick="openAuthModal()" class="btn-primary px-4 py-1.5 text-xs">Sign in</button>` : '';
+        nav.innerHTML = `<a href="/login" class="btn-primary px-4 py-1.5 text-xs inline-flex items-center gap-1.5"><i class="fa-solid fa-arrow-right-to-bracket text-[11px]"></i><span>Sign in</span></a>`;
         email.readOnly = false;
       }
       loadWatches();
