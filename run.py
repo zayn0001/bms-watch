@@ -1,12 +1,10 @@
 """Unified runner for BMS Watch.
 
-Supports both local CLI mode (identical to the initial script) and Full Web Server mode
-with Supabase Storage S3 mirror. On Render, checks are started by the GitHub Action calling
-/api/cron, not by a loop in the web app.
+Watches live in Supabase, so the web app and a local scheduled check share one database.
 
 Usage:
   python run.py             # Start the web app (default port 8000)
-  python run.py --cli       # Run a single check from terminal (Task Scheduler / Cron)
+  python run.py --cli       # Run a single check (Windows Task Scheduler runs this every 5 min)
   python run.py --loop 300  # Run terminal poller every 300s forever
   python run.py --test      # Offline self-check
 """
@@ -27,8 +25,7 @@ if ENV_FILE.exists():
             k, _, v = line.partition("=")
             os.environ.setdefault(k.strip(), v.strip())
 
-from bms_core import DATA_DIR, init_db, run_check_cycle
-from mirror import SupabaseStorageMirror
+from bms_core import init_db, run_check_cycle
 from server import run_server
 
 logging.basicConfig(
@@ -66,43 +63,24 @@ def main():
 
     # 2. Single CLI check
     if args.cli:
-        mirror = SupabaseStorageMirror(DATA_DIR)
-        mirror.pull()
-        try:
-            log.info("Running single check...")
-            res = run_check_cycle()
-            print(f"BMS Check Complete: {res['watches_checked']} watches, {res['total_changes']} change(s) found.")
-        finally:
-            mirror.push()
+        log.info("Running single check...")
+        res = run_check_cycle()
+        print(f"BMS Check Complete: {res['watches_checked']} watches, {res['total_changes']} change(s) found.")
         return
 
     # 3. Terminal loop
     if args.loop:
-        mirror = SupabaseStorageMirror(DATA_DIR)
-        mirror.pull()
-        mirror.start_background_sync(interval_sec=5)
-        every = args.loop
-        log.info("Starting terminal loop every %ds (Press Ctrl+C to stop)...", every)
-        try:
-            while True:
-                try:
-                    run_check_cycle()
-                except Exception:
-                    log.exception("Check crashed")
-                time.sleep(every)
-        finally:
-            mirror.push()
+        log.info("Starting terminal loop every %ds (Press Ctrl+C to stop)...", args.loop)
+        while True:
+            try:
+                run_check_cycle()
+            except Exception:
+                log.exception("Check crashed")
+            time.sleep(args.loop)
 
-    # 4. Default: web app + Supabase S3 mirror. Checks come from /api/cron (GitHub Action) or Look now.
-    mirror = SupabaseStorageMirror(DATA_DIR)
-    mirror.pull()
-    mirror.start_background_sync(interval_sec=5)
-
+    # 4. Default: the web app. Checks come from the local scheduled task (--cli) or Look now.
     log.info("Starting BMS Watch web platform on http://localhost:%d", args.port)
-    try:
-        run_server(args.port)
-    finally:
-        mirror.push()
+    run_server(args.port)
 
 
 if __name__ == "__main__":

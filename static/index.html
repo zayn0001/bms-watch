@@ -727,10 +727,10 @@
               <p class="text-xs text-[#8d879a] mt-0.5"><i class="fa-solid fa-location-dot mr-1"></i>${esc(w.region_slug.replace(/-/g, ' '))}</p>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <button onclick="toggleWatch(${w.id})" title="${w.is_active ? 'Close this eye (pause)' : 'Open this eye (resume)'}" class="w-9 h-9 rounded-full border border-lash hover:border-iris transition ${w.is_active ? 'text-lens' : 'text-[#8d879a]'}">
+              <button onclick="toggleWatch('${w.id}')" title="${w.is_active ? 'Close this eye (pause)' : 'Open this eye (resume)'}" class="w-9 h-9 rounded-full border border-lash hover:border-iris transition ${w.is_active ? 'text-lens' : 'text-[#8d879a]'}">
                 <i class="fa-solid ${w.is_active ? 'fa-eye' : 'fa-eye-slash'}"></i>
               </button>
-              <button onclick="deleteWatch(${w.id})" title="Delete" class="w-9 h-9 rounded-full border border-lash hover:border-red-400 hover:text-red-300 text-[#8d879a] transition"><i class="fa-solid fa-trash-can text-sm"></i></button>
+              <button onclick="deleteWatch('${w.id}')" title="Delete" class="w-9 h-9 rounded-full border border-lash hover:border-red-400 hover:text-red-300 text-[#8d879a] transition"><i class="fa-solid fa-trash-can text-sm"></i></button>
             </div>
           </div>
           <div class="flex flex-wrap gap-1.5 mt-3">

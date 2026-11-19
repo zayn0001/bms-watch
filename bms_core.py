@@ -1,4 +1,8 @@
-"""Core BMS Watch engine: Scraping, SQLite Storage, and Email Alerts.
+"""Core BMS Watch engine: Scraping, Supabase storage, and Email Alerts.
+
+Watches, check state and alert logs live in the shared Supabase project (schema bms_watch),
+reached through its REST API with the server key, so the Render site and a local scheduled
+check (python run.py --cli) share one database. SQLite only caches BookMyShow film lists.
 
 Runs with ZERO external dependencies (standard library only) for 100% local portability.
 """
@@ -12,6 +16,7 @@ import smtplib
 import sqlite3
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -32,7 +37,7 @@ if _env_path.exists():
 
 DATA_DIR = Path(os.getenv("DATA_DIR", ROOT_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "bms_watch.db"
+DB_PATH = DATA_DIR / "movies_cache.db"   # film-list cache only; watches live in Supabase
 LOG_PATH = DATA_DIR / "bms_watch.log"
 
 # Default configuration
@@ -41,6 +46,33 @@ DEFAULT_SMTP_PASS = os.getenv("SMTP_PASS", "")
 DEFAULT_MAIL_TO = [e.strip() for e in os.getenv("MAIL_TO", DEFAULT_SMTP_USER).split(",") if e.strip()]
 DEFAULT_SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 DEFAULT_SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.co").rstrip("/")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+
+
+def sb(method: str, path: str, body=None, prefer: str = ""):
+    """One Supabase REST (PostgREST) call on the bms_watch schema, e.g. sb("GET", "watches?is_active=eq.true").
+    Uses the server key, which bypasses row-level security: callers do their own ownership checks."""
+    if not SUPABASE_SECRET_KEY:
+        raise RuntimeError("SUPABASE_SECRET_KEY is not set")
+    headers = {
+        "apikey": SUPABASE_SECRET_KEY,
+        "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
+        "Accept-Profile": "bms_watch",
+        "Content-Profile": "bms_watch",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{SUPABASE_URL}/rest/v1/{path}", data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Supabase {method} {path.split('?')[0]} failed ({e.code}): {e.read()[:300]!r}") from None
+    return json.loads(raw) if raw else None
 
 BMS_SHOWTIMES_API = "https://in.bookmyshow.com/api/movies-data/v5/showtimes-by-event/primary-dynamic"
 BMS_HEADERS = {
@@ -158,62 +190,16 @@ def get_db():
 
 
 def init_db():
+    """SQLite holds only the BookMyShow film-list cache; losing it is harmless."""
     with get_db() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS watches (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,                  -- Supabase user ID UUID
-            movie_title TEXT NOT NULL,
-            event_code TEXT NOT NULL,
-            movie_slug TEXT NOT NULL,
-            region_code TEXT NOT NULL,
-            region_slug TEXT NOT NULL,
-            language TEXT DEFAULT 'english',
-            dates TEXT NOT NULL,           -- JSON array of YYYYMMDD strings
-            cinemas TEXT DEFAULT '[]',     -- JSON array of cinema names (empty = all)
-            formats TEXT DEFAULT '[]',     -- JSON array of formats (empty = all)
-            email TEXT NOT NULL,
-            is_active INTEGER DEFAULT 1,
-            created_at TEXT NOT NULL,
-            last_checked_at TEXT,
-            last_alert_at TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS state_cache (
-            key TEXT PRIMARY KEY,          -- event_code:region_code:date
-            data TEXT NOT NULL,            -- JSON snapshot of showtimes
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS alert_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            watch_id INTEGER,
-            title TEXT NOT NULL,
-            details TEXT,
-            sent_to TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(watch_id) REFERENCES watches(id) ON DELETE CASCADE
-        );
-
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS bms_movies_cache (
             region_code TEXT NOT NULL,
             explore_type TEXT NOT NULL,
             data TEXT NOT NULL,
             updated_at REAL NOT NULL,
             PRIMARY KEY(region_code, explore_type)
-        );
-        """)
-        # Safe migration for existing DB
-        try:
-            conn.execute("ALTER TABLE watches ADD COLUMN user_id TEXT")
-        except sqlite3.OperationalError:
-            pass  # Already exists
-        # Prime-seat feature was removed; drop its columns from older databases
-        for col in ("prime_seats_only", "min_seats_together"):
-            try:
-                conn.execute(f"ALTER TABLE watches DROP COLUMN {col}")
-            except sqlite3.OperationalError:
-                pass  # already gone
+        )""")
 
 
 def get_cached_movies_from_db(region_code: str, explore_type: str) -> tuple[float, list[dict]] | None:
@@ -748,12 +734,12 @@ def matches_watch_filters(diff_item: tuple, watch: dict) -> bool:
         return False
 
     # Filter cinemas
-    target_cinemas = json.loads(watch.get("cinemas") or "[]")
+    target_cinemas = watch.get("cinemas") or []
     if target_cinemas and not any(c.lower() in cinema.lower() for c in target_cinemas):
         return False
 
     # Filter formats
-    target_formats = json.loads(watch.get("formats") or "[]")
+    target_formats = watch.get("formats") or []
     if target_formats and show_key:
         if not any(f.lower() in show_key.lower() for f in target_formats):
             return False
@@ -888,8 +874,10 @@ _CHECK_LOCK = threading.Lock()
 def run_check_cycle() -> dict:
     """Executes a single checking cycle across all active watches.
     Returns: summary dict with change count and logs.
-    Overlapping calls (poller + manual "look now") return {"status": "busy"}
+    Overlapping calls in this process (scheduled check + manual "look now") return {"status": "busy"}
     instead of running twice and sending duplicate emails.
+    ponytail: the lock is per process, so a local scheduled check and Look now on Render running in
+    the same few seconds can both email one change; add a lock row in Supabase if that ever happens.
     """
     if not _CHECK_LOCK.acquire(blocking=False):
         return {"status": "busy", "watches_checked": 0, "total_changes": 0}
@@ -900,23 +888,17 @@ def run_check_cycle() -> dict:
 
 
 def _run_check_cycle() -> dict:
-    init_db()
-    with get_db() as conn:
-        watches = [dict(row) for row in conn.execute("SELECT * FROM watches WHERE is_active = 1").fetchall()]
-
+    watches = sb("GET", "watches?is_active=eq.true&select=*")
     if not watches:
         log.info("No active watches to check.")
         return {"status": "ok", "watches_checked": 0, "total_changes": 0}
 
     # Deduplicate checks by (event_code, region_code, date)
-    needed_queries = set()
-    for w in watches:
-        dates = json.loads(w.get("dates") or "[]")
-        for d in dates:
-            if d < today_ist():
-                continue
-            needed_queries.add((w["event_code"], w["region_code"], w["region_slug"], w.get("language", "english"), d))
-
+    today = today_ist()
+    needed_queries = {
+        (w["event_code"], w["region_code"], w["region_slug"], w.get("language") or "english", d)
+        for w in watches for d in (w.get("dates") or []) if d >= today
+    }
     log.info("Checking %d unique showtime query(s) for %d active watch(es)...", len(needed_queries), len(watches))
 
     # Fetch and parse
@@ -930,54 +912,43 @@ def _run_check_cycle() -> dict:
         except Exception:
             log.exception("Failed fetching showtimes for %s", key)
 
+    # Previous snapshots for every key in one request
+    old_snapshots = {}
+    if new_snapshots:
+        keys = ",".join(f'"{k}"' for k in new_snapshots)
+        old_snapshots = {r["key"]: r["data"] for r in sb("GET", f"state_cache?select=key,data&key=in.({urllib.parse.quote(keys)})")}
+
     total_changes = 0
     now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-    # Compare with cached state and evaluate each watch
-    with get_db() as conn:
-        for w in watches:
-            dates = json.loads(w.get("dates") or "[]")
-            watch_changes_by_date = {}
+    for w in watches:
+        watch_changes_by_date = {}
+        for d in w.get("dates") or []:
+            key = f"{w['event_code']}:{w['region_code']}:{d}"
+            if key not in new_snapshots:
+                continue
+            diffs = calculate_diff(old_snapshots.get(key) or {}, new_snapshots[key])
+            matched = [diff for diff in diffs if matches_watch_filters(diff, w)]
+            if matched:
+                watch_changes_by_date[d] = matched
+                total_changes += len(matched)
 
-            for d in dates:
-                key = f"{w['event_code']}:{w['region_code']}:{d}"
-                if key not in new_snapshots:
-                    continue
+        update = {"last_checked_at": now_str}
+        if watch_changes_by_date:
+            n = sum(map(len, watch_changes_by_date.values()))
+            log.info("Watch %s (%s): %d matching change(s) found!", w["id"], w["movie_title"], n)
+            try:
+                if send_email_alert(w, watch_changes_by_date):
+                    sb("POST", "alert_logs", {"watch_id": w["id"], "user_id": w["user_id"], "title": f"Alert for {w['movie_title']}",
+                                              "details": f"{n} change(s) detected", "sent_to": w.get("email", ""), "created_at": now_str})
+                    update["last_alert_at"] = now_str
+            except Exception:
+                log.exception("Failed sending email alert for watch %s", w["id"])
+        sb("PATCH", f"watches?id=eq.{w['id']}", update)
 
-                new_data = new_snapshots[key]
-                cur = conn.execute("SELECT data FROM state_cache WHERE key = ?", (key,))
-                row = cur.fetchone()
-                old_data = json.loads(row[0]) if row else {}
-
-                diffs = calculate_diff(old_data, new_data)
-                matched = [diff for diff in diffs if matches_watch_filters(diff, w)]
-                if matched:
-                    watch_changes_by_date[d] = matched
-                    total_changes += len(matched)
-
-            if watch_changes_by_date:
-                log.info("Watch #%s (%s): %d matching change(s) found!", w["id"], w["movie_title"], sum(map(len, watch_changes_by_date.values())))
-                try:
-                    sent = send_email_alert(w, watch_changes_by_date)
-                    if sent:
-                        conn.execute("INSERT INTO alert_logs (watch_id, title, details, sent_to, created_at) VALUES (?, ?, ?, ?, ?)", (
-                            w["id"],
-                            f"Alert for {w['movie_title']}",
-                            f"{sum(map(len, watch_changes_by_date.values()))} change(s) detected",
-                            w.get("email", ""),
-                            now_str
-                        ))
-                        conn.execute("UPDATE watches SET last_alert_at = ? WHERE id = ?", (now_str, w["id"]))
-                except Exception:
-                    log.exception("Failed sending email alert for watch #%s", w["id"])
-
-            conn.execute("UPDATE watches SET last_checked_at = ? WHERE id = ?", (now_str, w["id"]))
-
-        # Update cache with new snapshots
-        for key, snapshot in new_snapshots.items():
-            conn.execute("INSERT OR REPLACE INTO state_cache (key, data, updated_at) VALUES (?, ?, ?)", (
-                key, json.dumps(snapshot), now_str
-            ))
-        conn.commit()
+    # Save the new snapshots (upsert on key)
+    if new_snapshots:
+        sb("POST", "state_cache?on_conflict=key", [{"key": k, "data": v, "updated_at": now_str} for k, v in new_snapshots.items()],
+           prefer="resolution=merge-duplicates")
 
     return {"status": "ok", "watches_checked": len(watches), "total_changes": total_changes}

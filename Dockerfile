@@ -16,5 +16,4 @@ VOLUME /data
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:' + os.getenv('PORT', '10000') + '/api/health')" || exit 1
 
-# mirror.py pulls Supabase state on boot and syncs on shutdown before running server
 CMD ["python", "run.py"]

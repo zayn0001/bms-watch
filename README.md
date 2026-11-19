@@ -10,28 +10,14 @@ Designed for moviegoers and cinephiles who want first-day-first-show (FDFS) in t
 
 - **Zero-Dependency Local Execution:** Runs with pure Python 3.12 (standard library). No mandatory Docker, Redis, or Node.js required to run locally.
 - **Render Free Tier Deployment (`render.yaml`):** Deploys as a single Docker container web service in `singapore` (`ap-southeast-1`) with health check at `/api/health`.
-- **Supabase Storage S3 Mirroring (`mirror.py`):** Since Render free tier disks are ephemeral, `mirror.py` syncs the local SQLite database (`/data`) with Supabase Storage S3 (`default` bucket, folder `bms_watch/`), exactly matching the setup used in `openGym` and `food-tracker`.
+- **Supabase database:** Watches, check state and alert logs live in the shared Supabase project (schema `bms_watch`), reached through its REST API with `SUPABASE_SECRET_KEY`. The Render site and the local scheduled check (`python run.py --cli`, run every 5 minutes by Windows Task Scheduler) share that one database. Local SQLite only caches BookMyShow film lists.
 
 ```mermaid
 flowchart TD
-    subgraph Local ["Local Development (Zero Setup)"]
-        CLI["python run.py --cli (Direct Terminal Check)"]
-        WEB["python run.py (Web Dashboard http://localhost:8000)"]
-        LocalDB[("Local SQLite: data/bms_watch.db")]
-        CLI --> LocalDB
-        WEB --> LocalDB
-    end
-
-    subgraph RenderSupabase ["Render Free Tier + Supabase Storage"]
-        RenderService["Render Web Service (PORT: 10000)"]
-        Mirror["mirror.py (AWS SigV4 Sync Engine)"]
-        SupabaseS3[("Supabase Storage: default/bms_watch/")]
-        RenderService <--> Mirror <--> SupabaseS3
-    end
-
-    WEB --> BMS["BookMyShow v5 APIs"]
-    CLI --> BMS
-    RenderService --> BMS
+    Task["Windows Task Scheduler: python run.py --cli every 5 min"] --> DB[("Supabase: bms_watch schema")]
+    Site["Render web service (site + Look now)"] --> DB
+    Task --> BMS["BookMyShow APIs"]
+    Site --> BMS
 ```
 
 ---
@@ -110,13 +96,8 @@ This repository includes a [`render.yaml`](./render.yaml) file configured for Re
 | :--- | :--- | :--- |
 | `PORT` | Service port | `10000` |
 | `DATA_DIR` | Local container directory | `/data` |
-| `MIRROR_ENDPOINT` | Supabase Storage S3 endpoint | `https://<ref>.storage.supabase.co/storage/v1/s3` |
-| `MIRROR_BUCKET` | Supabase bucket name | `default` |
-| `MIRROR_PREFIX` | App folder prefix in bucket | `bms_watch/` |
-| `MIRROR_REGION` | Supabase bucket region | `ap-southeast-1` |
-| `MIRROR_KEY_ID` | Supabase S3 Access Key ID | *(Secret)* |
-| `MIRROR_SECRET` | Supabase S3 Secret Key | *(Secret)* |
+| `SUPABASE_SECRET_KEY` | Supabase server key (reads/writes watches) | *(Secret)* |
 | `SMTP_USER` | Email sender address | *(Secret)* |
 | `SMTP_PASS` | Gmail App Password | *(Secret)* |
 
-On container start, `mirror.py` pulls existing state from Supabase. While running, it pushes file changes every 5 seconds, and handles `SIGTERM` on shutdown/deploy to guarantee no watches are lost.
+Redeploys lose nothing: all state is in Supabase. The container's `/data` only holds a film-list cache.

@@ -15,7 +15,6 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from bms_core import (
-    DATA_DIR,
     POPULAR_FORMATS,
     POPULAR_REGIONS,
     ROOT_DIR,
@@ -25,7 +24,7 @@ from bms_core import (
     get_movie_info,
     today_ist,
     get_bms_regions,
-    get_db,
+    sb,
     init_db,
     run_check_cycle,
 )
@@ -87,11 +86,10 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         return verify_token(auth[7:].strip() if auth.lower().startswith("bearer ") else "")
 
-    def _owns(self, user: dict, wid: int) -> bool:
-        if user["admin"]:
-            return True
-        with get_db() as conn:
-            return conn.execute("SELECT 1 FROM watches WHERE id = ? AND (user_id = ? OR lower(email) = ?)", (wid, user["id"], user["email"])).fetchone() is not None
+    def _owned_watch(self, user: dict, wid: str) -> dict | None:
+        """The watch if this user may change it (theirs, or any for an admin), else None."""
+        rows = sb("GET", f"watches?id=eq.{wid}&select=id,is_active,user_id")
+        return rows[0] if rows and (user["admin"] or rows[0]["user_id"] == user["id"]) else None
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -197,24 +195,11 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             if not user:
                 return self._json(401, {"error": "Sign in first"})
 
-            with get_db() as conn:
-                if user["admin"]:
-                    rows = conn.execute("SELECT * FROM watches ORDER BY id DESC").fetchall()
-                else:
-                    rows = conn.execute("SELECT * FROM watches WHERE user_id = ? OR lower(email) = ? ORDER BY id DESC", (user["id"], user["email"])).fetchall()
-
-                watches = [dict(row) for row in rows]
-                for w in watches:
-                    w["dates"] = json.loads(w.get("dates") or "[]")
-                    w["cinemas"] = json.loads(w.get("cinemas") or "[]")
-                    w["formats"] = json.loads(w.get("formats") or "[]")
+            query = "watches?select=*&order=created_at.desc"
+            if not user["admin"]:
+                query += f"&user_id=eq.{urllib.parse.quote(user['id'])}"
+            watches = sb("GET", query)
             return self._json(200, watches, headers={"X-Admin": "1"} if user["admin"] else None)
-
-        # Alert logs
-        if path == "/api/logs":
-            with get_db() as conn:
-                logs = [dict(row) for row in conn.execute("SELECT * FROM alert_logs ORDER BY id DESC LIMIT 50").fetchall()]
-            return self._json(200, logs)
 
         # Serve login / sign-in page
         if path in ("/login", "/login.html", "/sign-in", "/sign-in.html"):
@@ -288,35 +273,21 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                 return self._json(400, {"error": "event_code looks like ET00526306"})
             event_code = event_code.upper()
 
-            import datetime
-            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            with get_db() as conn:
-                cur = conn.cursor()
-                cur.execute("""
-                INSERT INTO watches (
-                    user_id, movie_title, event_code, movie_slug, region_code, region_slug,
-                    language, dates, cinemas, formats,
-                    email, is_active, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                """, (
-                    user_id, title, event_code, slug, region_code, region_slug,
-                    language, json.dumps(dates), json.dumps(cinemas), json.dumps(formats),
-                    email, now
-                ))
-                new_id = cur.lastrowid
-                conn.commit()
-
-            return self._json(201, {"status": "created", "watch_id": new_id})
+            row = sb("POST", "watches", {
+                "user_id": user_id, "movie_title": title, "event_code": event_code, "movie_slug": slug,
+                "region_code": region_code, "region_slug": region_slug, "language": language,
+                "dates": dates, "cinemas": cinemas, "formats": formats, "email": email, "is_active": True,
+            }, prefer="return=representation")
+            return self._json(201, {"status": "created", "watch_id": row[0]["id"]})
 
         # Toggle Active / Paused
-        match_toggle = re.match(r"^/api/watches/(\d+)/toggle$", path)
+        match_toggle = re.match(r"^/api/watches/([0-9a-fA-F-]{36})/toggle$", path)
         if match_toggle:
-            wid = int(match_toggle.group(1))
-            if not self._owns(user, wid):
+            wid = match_toggle.group(1).lower()
+            w = self._owned_watch(user, wid)
+            if not w:
                 return self._json(404, {"error": "No such watch"})
-            with get_db() as conn:
-                conn.execute("UPDATE watches SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?", (wid,))
-                conn.commit()
+            sb("PATCH", f"watches?id=eq.{wid}", {"is_active": not w["is_active"]})
             return self._json(200, {"status": "ok", "watch_id": wid})
 
         return self._json(404, {"error": "Route not found"})
@@ -324,15 +295,13 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
     def do_DELETE(self):
         url = urllib.parse.urlparse(self.path)
         path = url.path.rstrip("/")
-        match_del = re.match(r"^/api/watches/(\d+)$", path)
+        match_del = re.match(r"^/api/watches/([0-9a-fA-F-]{36})$", path)
         if match_del:
-            wid = int(match_del.group(1))
+            wid = match_del.group(1).lower()
             user = self._user()
-            if not user or not self._owns(user, wid):
+            if not user or not self._owned_watch(user, wid):
                 return self._json(404 if user else 401, {"error": "No such watch" if user else "Sign in first"})
-            with get_db() as conn:
-                conn.execute("DELETE FROM watches WHERE id = ?", (wid,))
-                conn.commit()
+            sb("DELETE", f"watches?id=eq.{wid}")
             return self._json(200, {"status": "deleted", "watch_id": wid})
 
         return self._json(404, {"error": "Route not found"})
