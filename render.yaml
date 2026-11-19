@@ -24,6 +24,9 @@ services:
         value: https://ismyhkcsxrswqsfzfrxe.supabase.co
       - key: SUPABASE_ANON_KEY
         sync: false
+      # Comma-separated Supabase user ids or emails who see and manage every watch
+      - key: ADMIN_UID
+        sync: false
       # Supabase Storage in the shared project and private `default` bucket,
       # isolated inside its own folder (MIRROR_PREFIX: bms_watch/)
       - key: MIRROR_ENDPOINT

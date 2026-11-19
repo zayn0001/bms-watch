@@ -156,9 +156,6 @@
           <button id="scanBtn" onclick="triggerManualCheck()" class="btn-primary px-5 py-2.5 text-sm flex items-center gap-2">
             <i class="fa-solid fa-eye"></i><span>Look now</span>
           </button>
-          <button onclick="showTab('new')" class="btn-ghost px-5 py-2.5 text-sm flex items-center gap-2">
-            <i class="fa-solid fa-plus"></i><span>New watch</span>
-          </button>
         </div>
       </div>
     </section>
@@ -172,12 +169,17 @@
           </div>
     </div>
 
+    <!-- Search any film -->
+    <div class="relative mb-4">
+      <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8d879a] text-sm pointer-events-none"></i>
+      <input id="filmSearch" type="search" autocomplete="off" spellcheck="false" oninput="onSearchInput()" placeholder="Search any film on BookMyShow, even ones months away" aria-label="Search films" class="field !pl-10 !py-3 !text-sm">
+    </div>
+
     <!-- Tabs -->
     <nav class="flex gap-1.5 overflow-x-auto pb-1 mb-6 -mx-4 px-4 sm:mx-0 sm:px-0" role="tablist">
       <button class="tab shrink-0 px-4 py-2 rounded-full text-sm font-semibold text-[#cfc9d8] bg-lid border border-lash" role="tab" data-tab="now" onclick="showTab('now')"><i class="fa-solid fa-film mr-1.5 text-[#8d879a]"></i>In cinemas</button>
       <button class="tab shrink-0 px-4 py-2 rounded-full text-sm font-semibold text-[#cfc9d8] bg-lid border border-lash" role="tab" data-tab="soon" onclick="showTab('soon')"><i class="fa-solid fa-hourglass-half mr-1.5 text-[#8d879a]"></i>On the horizon</button>
       <button class="tab shrink-0 px-4 py-2 rounded-full text-sm font-semibold text-[#cfc9d8] bg-lid border border-lash" role="tab" data-tab="watching" onclick="showTab('watching')"><i class="fa-solid fa-eye mr-1.5 text-[#8d879a]"></i>Watchlist <span id="watchCount" class="ml-1 text-xs opacity-60"></span></button>
-      <button class="tab shrink-0 px-4 py-2 rounded-full text-sm font-semibold text-[#cfc9d8] bg-lid border border-lash" role="tab" data-tab="new" onclick="showTab('new')"><i class="fa-solid fa-plus mr-1.5 text-[#8d879a]"></i>New watch</button>
     </nav>
 
     <!-- Panel: now showing -->
@@ -198,10 +200,16 @@
       <div id="grid-upcoming" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4"></div>
     </section>
 
+    <!-- Panel: search results -->
+    <section id="panel-search" class="panel hidden" role="tabpanel">
+      <div class="mb-4"><h2 class="font-display text-2xl font-extrabold">Search results</h2><p id="searchNote" class="text-sm text-[#8d879a]">Tap one to start watching it.</p></div>
+      <div id="grid-search" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4"></div>
+    </section>
+
     <!-- Panel: watchlist -->
     <section id="panel-watching" class="panel hidden" role="tabpanel">
       <div class="flex items-end justify-between mb-4">
-        <div><h2 class="font-display text-2xl font-extrabold">Your watchlist</h2><p class="text-sm text-[#8d879a]">Open eyes are checked every few minutes. Close one to pause it.</p></div>
+        <div><h2 id="watchHeading" class="font-display text-2xl font-extrabold">Your watchlist</h2><p class="text-sm text-[#8d879a]">Open eyes are checked every few minutes. Close one to pause it.</p></div>
       </div>
       <div id="watchList" class="grid md:grid-cols-2 gap-4"></div>
     </section>
@@ -209,15 +217,14 @@
     <!-- Panel: new watch -->
     <section id="panel-new" class="panel hidden" role="tabpanel">
       <form id="watchForm" onsubmit="handleWatchSubmit(event)" class="card p-6 max-w-2xl space-y-5">
-        <div>
-          <h2 class="font-display text-2xl font-extrabold">Set a new watch</h2>
-          <p class="text-sm text-[#8d879a]">Watching in <b id="formCity" class="text-sclera">Coimbatore</b>. Change the city at the top.</p>
-        </div>
-        <div>
-          <label class="label" for="fFilm">Film</label>
-          <select id="fFilm" required onchange="onFilmChange()" class="field font-semibold [&_option]:bg-lid [&_optgroup]:bg-lid">
-            <option value="">Loading films…</option>
-          </select>
+        <div class="flex gap-4 items-start">
+          <img id="filmPoster" alt="" class="w-16 aspect-[40/66] rounded-lg object-cover bg-lid border border-lash shrink-0">
+          <div class="min-w-0 flex-1">
+            <h2 id="filmTitle" class="font-display text-2xl font-extrabold leading-tight"></h2>
+            <p id="filmSub" class="text-xs text-[#8d879a] mt-0.5"></p>
+            <p class="text-sm text-[#8d879a] mt-2">Watching in <b id="formCity" class="text-sclera">Coimbatore</b>. Change the city at the top.</p>
+          </div>
+          <button type="button" onclick="showTab(lastBrowseTab)" class="btn-ghost px-3 py-1.5 text-xs shrink-0">Change film</button>
         </div>
 
         <div>
@@ -276,7 +283,9 @@
     let selectedDates = new Set();
     let selectedCinemas = new Set();
     let movieInfo = null, infoKey = '';   // infoKey = film+city the dates/cinemas belong to
-    const movieCache = { movies: [], upcoming: [] };
+    const movieCache = { movies: [], upcoming: [], search: [] };
+    let selectedFilm = null;          // the film the watch form is for; only set by picking a card
+    let lastBrowseTab = 'now';
     let authMode = 'sign-in';
     let cooldownTimer = null;
 
@@ -342,7 +351,8 @@
 
     // ---------------------------------------------------------------- tabs
     function showTab(name) {
-      if (!$('panel-' + name)) name = 'now';
+      if (!$('panel-' + name) || (name === 'new' && !selectedFilm) || (name === 'search' && !$('filmSearch').value.trim())) name = 'now';
+      if (name !== 'new') lastBrowseTab = name;
       document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden', p.id !== 'panel-' + name));
       document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === name));
       history.replaceState(null, '', '#' + name);
@@ -378,6 +388,7 @@
       if (cityChanged) {
         selectedCinemas.clear();
         movieInfo = null;
+        if (selectedFilm) onFilmChange();   // dates and cinemas are per city
       }
       loadCityVenues();
       if (!refetch) return;
@@ -477,7 +488,19 @@
         const movies = await res.json();
         if (Array.isArray(movies) && movies.length) {
           movieCache[type] = movies;
-          grid.innerHTML = movies.map((m, i) => `
+          grid.innerHTML = movieCards(type, movies);
+        } else if (!movieCache[type]?.length) {
+          grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-[#8d879a] text-sm mb-3"><i class="fa-regular fa-eye-slash text-2xl block mb-2"></i>Nothing in sight here yet.</p><button type="button" onclick="fetchMovies('${type}', true)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
+        }
+      } catch (err) {
+        if (!movieCache[type]?.length) {
+          grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-red-300 text-sm mb-3">Couldn't reach BookMyShow.</p><button type="button" onclick="fetchMovies('${type}', true)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
+        }
+      }
+    }
+
+    function movieCards(type, movies) {
+      return movies.map((m, i) => `
           <button type="button" onclick="pickMovie('${type}', ${i})" class="group text-left">
             <div class="relative aspect-[40/66] rounded-2xl overflow-hidden bg-lid border border-lash group-hover:border-iris transition">
               <img src="${esc(m.image)}" alt="" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
@@ -488,44 +511,36 @@
             <h3 class="mt-2 text-sm font-semibold truncate" title="${esc(m.name)}">${esc(m.name)}</h3>
             ${m.subtitle ? `<p class="text-[11px] text-[#8d879a] truncate">${esc(m.subtitle)}</p>` : ''}
           </button>`).join('');
-        } else if (!movieCache[type]?.length) {
-          grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-[#8d879a] text-sm mb-3"><i class="fa-regular fa-eye-slash text-2xl block mb-2"></i>Nothing in sight here yet.</p><button type="button" onclick="fetchMovies('${type}', true)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
-        }
-      } catch (err) {
-        if (!movieCache[type]?.length) {
-          grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-red-300 text-sm mb-3">Couldn't reach BookMyShow.</p><button type="button" onclick="fetchMovies('${type}', true)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
-        }
-      } finally { populateFilmSelect(); }
     }
 
-    function filmByCode(code) {
-      return [...movieCache.movies, ...movieCache.upcoming].find(m => m.event_code === code);
-    }
-
-    function populateFilmSelect() {
-      const sel = $('fFilm'), keep = sel.value;
-      const group = (label, list) => {
-        const opts = list.filter(m => m.event_code).map(m => {
-          const lang = m.language ? ` [${m.language.toUpperCase()}]` : '';
-          return `<option value="${esc(m.event_code)}">${esc(m.name)}${lang}</option>`;
-        }).join('');
-        return opts ? `<optgroup label="${label}">${opts}</optgroup>` : '';
-      };
-      const newHtml = `<option value="">Choose a film</option>` + group('In cinemas', movieCache.movies) + group('Coming soon', movieCache.upcoming);
-      if (sel.innerHTML !== newHtml) {
-        sel.innerHTML = newHtml;
-        if (keep && filmByCode(keep)) {
-          sel.value = keep;
-          if (infoKey !== keep + currentCity.code) onFilmChange();
-        } else if (keep) {
-          onFilmChange();   // city changed and the film isn't showing here
+    // Search BookMyShow as you type (it needs 3+ characters); stale replies are dropped.
+    let searchTimer = null, searchSeq = 0;
+    function onSearchInput() {
+      clearTimeout(searchTimer);
+      const q = $('filmSearch').value.trim();
+      if (!q) return showTab(lastBrowseTab === 'search' ? 'now' : lastBrowseTab);
+      if (q.length < 3) return;
+      searchTimer = setTimeout(async () => {
+        const seq = ++searchSeq;
+        showTab('search');
+        $('searchNote').textContent = `Searching BookMyShow for “${q}”…`;
+        try {
+          const res = await fetch(`/api/bms/search?q=${encodeURIComponent(q)}&region=${encodeURIComponent(currentCity.code)}&slug=${encodeURIComponent(currentCity.slug)}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const movies = await res.json();
+          if (seq !== searchSeq) return;
+          movieCache.search = movies;
+          $('grid-search').innerHTML = movieCards('search', movies);
+          $('searchNote').textContent = movies.length ? 'Tap one to start watching it.' : `No films on BookMyShow match “${q}”.`;
+        } catch {
+          if (seq === searchSeq) $('searchNote').textContent = "Couldn't reach BookMyShow. Try again in a moment.";
         }
-      }
+      }, 300);
     }
 
     async function onFilmChange() {
-      const m = filmByCode($('fFilm').value);
-      infoKey = $('fFilm').value + currentCity.code;
+      const m = selectedFilm;
+      infoKey = (m?.event_code || '') + currentCity.code;
       selectedDates.clear(); movieInfo = null;
       renderDates(); renderCinemas();
       if (!m) return;
@@ -542,7 +557,7 @@
         const res = await fetch(`/api/bms/movie-info?${q}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const info = await res.json();
-        if ($('fFilm').value !== m.event_code) return;   // user picked another film meanwhile
+        if (selectedFilm !== m || infoKey !== m.event_code + currentCity.code) return;   // picked another film or city meanwhile
         movieInfo = info;
         if (info.fallback) {
           $('dateNote').textContent = "Couldn't reach live showtimes right now, but you can still pick dates to watch below.";
@@ -568,7 +583,10 @@
     function pickMovie(type, i) {
       const m = movieCache[type][i];
       if (!m.event_code) return showToast(`${m.name} isn't on BookMyShow's booking system yet.`, true);
-      $('fFilm').value = m.event_code;
+      selectedFilm = m;
+      $('filmTitle').textContent = m.name;
+      $('filmSub').textContent = m.subtitle || '';
+      $('filmPoster').src = m.image || '';
       onFilmChange();
       showTab('new');
       window.scrollTo({ top: $('panel-new').offsetTop - 90, behavior: 'smooth' });
@@ -591,7 +609,7 @@
 
     function renderDates() {
       const grid = $('dateGrid');
-      const hasFilm = Boolean($('fFilm').value);
+      const hasFilm = Boolean(selectedFilm);
       $('dateMore').classList.toggle('hidden', !movieInfo && !hasFilm);
       if (!movieInfo) {
         grid.innerHTML = '';
@@ -670,11 +688,21 @@
     });
 
     // ---------------------------------------------------------------- watches
+    // Watch routes need the Supabase sign-in token; the server works out who you are from it.
+    async function authFetch(url, opts = {}) {
+      const token = (await supabaseClient.auth.getSession()).data.session?.access_token;
+      return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } });
+    }
+
     async function loadWatches() {
-      let url = '/api/watches';
-      if (currentSession?.user) url += `?email=${encodeURIComponent(currentSession.user.email)}&user_id=${encodeURIComponent(currentSession.user.id)}`;
-      let watches = [];
-      try { watches = await (await fetch(url)).json(); } catch { return; }
+      let watches = [], isAdmin = false;
+      try {
+        const res = await authFetch('/api/watches');
+        if (!res.ok) return;
+        isAdmin = res.headers.get('X-Admin') === '1';
+        watches = await res.json();
+      } catch { return; }
+      $('watchHeading').textContent = isAdmin ? "Everyone's watches" : 'Your watchlist';
 
       const open = watches.filter(w => w.is_active);
       $('statOpen').textContent = open.length;
@@ -719,7 +747,7 @@
 
     async function handleWatchSubmit(e) {
       e.preventDefault();
-      const film = filmByCode($('fFilm').value);
+      const film = selectedFilm;
       if (!film) return showToast('Pick a film first.', true);
       if (!selectedDates.size) return showToast('Pick at least one date.', true);
       const payload = {
@@ -732,16 +760,15 @@
         dates: [...selectedDates].sort(),
         cinemas: [...selectedCinemas],
         formats: [...selectedFormats],
-        email: $('fEmail').value.trim(),
-        user_id: currentSession?.user?.id || null,
       };
       try {
-        const res = await fetch('/api/watches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const res = await authFetch('/api/watches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await res.json();
         if (!res.ok) return showToast(data.error || 'Could not save that watch.', true);
         showToast(`Eyes on ${payload.movie_title}.`);
         $('watchForm').reset();
         selectedFormats.clear();
+        selectedFilm = null;
         onFilmChange();
         document.querySelectorAll('#formatChips .chip').forEach(c => c.classList.remove('on'));
         if (currentSession?.user) $('fEmail').value = currentSession.user.email;
@@ -750,10 +777,10 @@
       } catch { showToast('Network error.', true); }
     }
 
-    async function toggleWatch(id) { await fetch(`/api/watches/${id}/toggle`, { method: 'POST' }); loadWatches(); }
+    async function toggleWatch(id) { await authFetch(`/api/watches/${id}/toggle`, { method: 'POST' }); loadWatches(); }
     async function deleteWatch(id) {
       if (!confirm('Stop watching and delete this?')) return;
-      await fetch(`/api/watches/${id}`, { method: 'DELETE' });
+      await authFetch(`/api/watches/${id}`, { method: 'DELETE' });
       loadWatches();
     }
 

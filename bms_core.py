@@ -335,6 +335,37 @@ def fetch_live_bms_movies(region_code: str, region_slug: str, explore_type: str)
     return []
 
 
+def search_bms_movies(query: str, region_code: str = "COIM", region_slug: str = "") -> list[dict]:
+    """Films matching `query` from BookMyShow's own search box, including ones not yet listed as upcoming."""
+    import uuid
+    region_code = (region_code or "COIM").upper()
+    headers = dict(BMS_HEADERS, **{"x-region-code": region_code, "x-region-slug": resolve_region_slug(region_code, region_slug), "x-bms-id": str(uuid.uuid4())})
+    url = "https://in.bookmyshow.com/api/v1/search/dynamic?" + urllib.parse.urlencode({"q": query, "instant": "true", "firstLoad": "false"})
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as r:
+        d = json.load(r)
+    cards = (((d.get("data") or {}).get("widgets") or {}).get("search-vi-v2-results") or {}).get("data", {}).get("cards", {}).get("data", [])
+    movies = []
+    for c in cards:
+        x = c.get("data") or {}
+        code, cta_url = x.get("identifier") or "", (x.get("cta") or {}).get("url", "")
+        if (x.get("analytics") or {}).get("type") != "movies" or not re.fullmatch(r"ET\d+", code):
+            continue
+        m_slug = re.search(r"/movies/(?:[^/]+/)?([^/?#]+)/ET\d+", cta_url)
+        langs = re.findall(r"[A-Za-z]+", re.sub(r"&\s*\d+\s*more", "", x.get("result-language") or ""))
+        movies.append({
+            "name": x.get("result-title", ""),
+            "subtitle": " · ".join(s for s in ((x.get("result-context") or "").strip(" |"), x.get("result-language") or "") if s),
+            "image": x.get("result-poster-url") or x.get("result-icon", ""),
+            "url": cta_url,
+            "event_code": code,
+            "slug": m_slug.group(1) if m_slug else "",
+            "type": "search",
+            "language": langs[0].lower() if langs else "",
+            "languages": [l.lower() for l in langs],
+        })
+    return movies
+
+
 def get_bms_movies(region_code: str = "COIM", region_slug: str = "", explore_type: str = "movies") -> list[dict]:
     region_code = (region_code or "COIM").upper()
     region_slug = resolve_region_slug(region_code, region_slug)

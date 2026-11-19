@@ -7,7 +7,9 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.parse
+import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from bms_core import (
     POPULAR_REGIONS,
     ROOT_DIR,
     get_bms_movies,
+    search_bms_movies,
     get_city_venues,
     get_movie_info,
     today_ist,
@@ -31,6 +34,35 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger("bms_watch.server")
 
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.co")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", ""))
+# Comma-separated Supabase user ids and/or emails who see and manage every watch.
+ADMINS = {a.strip().lower() for a in os.getenv("ADMIN_UID", "").split(",") if a.strip()}
+_token_cache: dict[str, tuple[float, dict]] = {}
+
+
+def verify_token(token: str) -> dict | None:
+    """Supabase user {id, email} for a sign-in access token, or None. Asks Supabase, cached 5 minutes."""
+    if not token:
+        return None
+    hit = _token_cache.get(token)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    req = urllib.request.Request(f"{SUPABASE_URL}/auth/v1/user", headers={"Authorization": f"Bearer {token}", "apikey": SUPABASE_ANON_KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            u = json.load(r)
+    except Exception:
+        return None
+    user = {"id": u.get("id") or "", "email": (u.get("email") or "").lower()}
+    if not user["id"]:
+        return None
+    user["admin"] = bool(ADMINS & {user["id"].lower(), user["email"]})
+    if len(_token_cache) > 500:
+        _token_cache.clear()
+    _token_cache[token] = (time.time() + 300, user)
+    return user
+
 class BMSWatchHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -42,18 +74,28 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         if headers:
             for k, v in headers.items():
                 self.send_header(k, v)
         self.end_headers()
         self.wfile.write(payload)
 
+    def _user(self) -> dict | None:
+        auth = self.headers.get("Authorization", "")
+        return verify_token(auth[7:].strip() if auth.lower().startswith("bearer ") else "")
+
+    def _owns(self, user: dict, wid: int) -> bool:
+        if user["admin"]:
+            return True
+        with get_db() as conn:
+            return conn.execute("SELECT 1 FROM watches WHERE id = ? AND (user_id = ? OR lower(email) = ?)", (wid, user["id"], user["email"])).fetchone() is not None
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def do_GET(self):
@@ -90,6 +132,19 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             mtype = qs.get("type", ["movies"])[0].lower()
             movies = get_bms_movies(region, slug, mtype)
             return self._json(200, movies, headers={"Cache-Control": "public, max-age=60"})
+
+        # Any film on BookMyShow by name, including ones not yet in "upcoming"
+        if path == "/api/bms/search":
+            qs = urllib.parse.parse_qs(url.query)
+            q = qs.get("q", [""])[0].strip()[:80]
+            if len(q) < 2:
+                return self._json(200, [])
+            try:
+                movies = search_bms_movies(q, qs.get("region", ["COIM"])[0], qs.get("slug", [""])[0].lower())
+            except Exception:
+                log.exception("search failed for %r", q)
+                return self._json(502, {"error": "Couldn't reach BookMyShow"})
+            return self._json(200, movies, headers={"Cache-Control": "public, max-age=300"})
 
         if path == "/api/formats":
             return self._json(200, POPULAR_FORMATS)
@@ -129,26 +184,24 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                     "fallback": True,
                 })
 
-        # Watches list (filtered by user if user_id or email query param provided)
+        # Watches: the signed-in user's own, or everyone's for an admin (ADMIN_UID)
         if path == "/api/watches":
-            qs = urllib.parse.parse_qs(url.query)
-            user_id = qs.get("user_id", [None])[0]
-            email_filter = qs.get("email", [None])[0]
+            user = self._user()
+            if not user:
+                return self._json(401, {"error": "Sign in first"})
 
             with get_db() as conn:
-                if user_id:
-                    rows = conn.execute("SELECT * FROM watches WHERE user_id = ? ORDER BY id DESC", (user_id,)).fetchall()
-                elif email_filter:
-                    rows = conn.execute("SELECT * FROM watches WHERE email = ? ORDER BY id DESC", (email_filter,)).fetchall()
-                else:
+                if user["admin"]:
                     rows = conn.execute("SELECT * FROM watches ORDER BY id DESC").fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM watches WHERE user_id = ? OR lower(email) = ? ORDER BY id DESC", (user["id"], user["email"])).fetchall()
 
                 watches = [dict(row) for row in rows]
                 for w in watches:
                     w["dates"] = json.loads(w.get("dates") or "[]")
                     w["cinemas"] = json.loads(w.get("cinemas") or "[]")
                     w["formats"] = json.loads(w.get("formats") or "[]")
-            return self._json(200, watches)
+            return self._json(200, watches, headers={"X-Admin": "1"} if user["admin"] else None)
 
         # Alert logs
         if path == "/api/logs":
@@ -195,6 +248,10 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             result = run_check_cycle()
             return self._json(200, result)
 
+        user = self._user() if path.startswith("/api/watches") else None
+        if path.startswith("/api/watches") and not user:
+            return self._json(401, {"error": "Sign in first"})
+
         # Create Watch
         if path == "/api/watches":
             title = payload.get("movie_title") or "Custom Movie"
@@ -206,8 +263,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             cinemas = payload.get("cinemas") or []
             formats = payload.get("formats") or []
             language = (payload.get("language") or "english").strip().lower()
-            email = payload.get("email", "").strip()
-            user_id = payload.get("user_id")
+            email, user_id = user["email"], user["id"]   # from the verified token, never the body
 
             if not event_code:
                 return self._json(400, {"error": "Pick a film first"})
@@ -247,6 +303,8 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         match_toggle = re.match(r"^/api/watches/(\d+)/toggle$", path)
         if match_toggle:
             wid = int(match_toggle.group(1))
+            if not self._owns(user, wid):
+                return self._json(404, {"error": "No such watch"})
             with get_db() as conn:
                 conn.execute("UPDATE watches SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?", (wid,))
                 conn.commit()
@@ -260,6 +318,9 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         match_del = re.match(r"^/api/watches/(\d+)$", path)
         if match_del:
             wid = int(match_del.group(1))
+            user = self._user()
+            if not user or not self._owns(user, wid):
+                return self._json(404 if user else 401, {"error": "No such watch" if user else "Sign in first"})
             with get_db() as conn:
                 conn.execute("DELETE FROM watches WHERE id = ?", (wid,))
                 conn.commit()
