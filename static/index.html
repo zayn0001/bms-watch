@@ -488,7 +488,7 @@
             ${m.subtitle ? `<p class="text-[11px] text-[#8d879a] truncate">${esc(m.subtitle)}</p>` : ''}
           </button>`).join('');
       } catch (err) {
-        grid.innerHTML = `<p class="col-span-full text-center py-12 text-red-300 text-sm">Couldn't reach BookMyShow.</p>`;
+        grid.innerHTML = `<div class="col-span-full text-center py-12"><p class="text-red-300 text-sm mb-3">Couldn't reach BookMyShow.</p><button type="button" onclick="fetchMovies('${type}')" class="btn-ghost px-4 py-2 text-xs">Try again</button></div>`;
       } finally { populateFilmSelect(); }
     }
 
@@ -518,13 +518,26 @@
       const q = new URLSearchParams({ event: m.event_code, region: currentCity.code, slug: currentCity.slug, movie_slug: m.slug || '' });
       try {
         const res = await fetch(`/api/bms/movie-info?${q}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const info = await res.json();
         if ($('fFilm').value !== m.event_code) return;   // user picked another film meanwhile
-        if (!res.ok) throw new Error(info.error);
         movieInfo = info;
-      } catch {
-        $('dateNote').textContent = "Couldn't reach BookMyShow. Try again in a moment.";
-        return;
+        if (info.fallback) {
+          $('dateNote').textContent = "Couldn't reach live showtimes right now, but you can still pick dates to watch below.";
+        }
+      } catch (err) {
+        console.warn('movie-info fallback:', err);
+        const todayStr = ymd(new Date());
+        movieInfo = {
+          today: todayStr,
+          earliest_date: todayStr,
+          bookable_dates: [],
+          movie_venues: [],
+          venues: cityVenues || [],
+          venues_source: 'city',
+          fallback: true
+        };
+        $('dateNote').textContent = "Couldn't reach live showtimes right now, but you can still pick dates to watch below.";
       } finally {
         renderDates(); renderCinemas();
       }
@@ -556,15 +569,22 @@
 
     function renderDates() {
       const grid = $('dateGrid');
-      $('dateMore').classList.toggle('hidden', !movieInfo);
-      if (!movieInfo) { grid.innerHTML = ''; if (!$('fFilm').value) $('dateNote').textContent = 'Pick a film to see its dates.'; return; }
-      const { earliest_date: start, bookable_dates: open, release_date: rel } = movieInfo;
+      const hasFilm = Boolean($('fFilm').value);
+      $('dateMore').classList.toggle('hidden', !movieInfo && !hasFilm);
+      if (!movieInfo) {
+        grid.innerHTML = '';
+        if (!hasFilm) $('dateNote').textContent = 'Pick a film to see its dates.';
+        return;
+      }
+      const { earliest_date: start = ymd(new Date()), bookable_dates: open = [], release_date: rel } = movieInfo;
       $('fDatePick').min = ymdToIso(start);
-      $('dateNote').textContent = open.length
-        ? `Bookings are open for ${open.length} date${open.length > 1 ? 's' : ''} (marked). Pick any of these or later ones: we'll watch for new shows and seats.`
-        : rel && rel > movieInfo.today
-          ? `Releases ${prettyDate(rel)}. Bookings aren't open yet; we'll tell you the moment they are.`
-          : `Bookings aren't open yet; we'll tell you the moment they are.`;
+      if (!movieInfo.fallback) {
+        $('dateNote').textContent = open.length
+          ? `Bookings are open for ${open.length} date${open.length > 1 ? 's' : ''} (marked). Pick any of these or later ones: we'll watch for new shows and seats.`
+          : rel && rel > movieInfo.today
+            ? `Releases ${prettyDate(rel)}. Bookings aren't open yet; we'll tell you the moment they are.`
+            : `Bookings aren't open yet; pick dates to watch and we'll tell you the moment they are.`;
+      }
       const days = new Set(Array.from({ length: 14 }, (_, i) => addDays(start, i)));
       selectedDates.forEach(d => days.add(d));   // keep extra picked dates visible
       grid.innerHTML = [...days].sort().map(d => `

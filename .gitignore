@@ -47,6 +47,10 @@ node_modules/
 out/
 dist/
 
+# Supabase
+.temp/
+supabase/.temp/
+
 # OS and IDE
 .DS_Store
 Thumbs.db

@@ -104,16 +104,26 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             event = qs.get("event", [""])[0].upper()
             if not re.fullmatch(r"ET\d+", event):
                 return self._json(400, {"error": "unknown film"})
+            region = qs.get("region", ["COIM"])[0].upper()
+            slug = qs.get("slug", ["coimbatore"])[0].lower()
+            movie_slug = qs.get("movie_slug", [""])[0].lower()
             try:
-                return self._json(200, get_movie_info(
-                    event,
-                    qs.get("region", ["COIM"])[0].upper(),
-                    qs.get("slug", ["coimbatore"])[0].lower(),
-                    qs.get("movie_slug", [""])[0].lower(),
-                ))
+                info = get_movie_info(event, region, slug, movie_slug)
+                return self._json(200, info)
             except Exception:
                 log.exception("movie-info failed for %s", event)
-                return self._json(502, {"error": "Couldn't reach BookMyShow"})
+                today = today_ist()
+                city_venues = [v for v in get_city_venues(region, slug) if v]
+                return self._json(200, {
+                    "today": today,
+                    "release_date": None,
+                    "earliest_date": today,
+                    "bookable_dates": [],
+                    "movie_venues": [],
+                    "venues": city_venues,
+                    "venues_source": "city",
+                    "fallback": True,
+                })
 
         # Watches list (filtered by user if user_id or email query param provided)
         if path == "/api/watches":

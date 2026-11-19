@@ -362,12 +362,33 @@ def get_city_venues(region_code: str, region_slug: str = "") -> list[str]:
 def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_slug: str) -> dict:
     """What the watch form needs: earliest watchable date, already-bookable dates, and cinemas."""
     today = today_ist()
-    raw = fetch_bms_showtimes(event_code, today, region_code, region_slug)
-    dates = [d for d in bookable_dates(raw) if d >= today]
-    movie_venues = sorted(parse_bms_showtimes(raw)) if dates else []
-    city_venues = get_city_venues(region_code, region_slug)
+    raw = {}
+    dates = []
+    movie_venues = []
+    try:
+        raw = fetch_bms_showtimes(event_code, today, region_code, region_slug)
+        dates = [d for d in bookable_dates(raw) if d >= today]
+        if dates:
+            parsed = parse_bms_showtimes(raw)
+            movie_venues = sorted(v for v in parsed if isinstance(v, str) and v.strip())
+    except Exception:
+        log.warning("Could not fetch showtimes for %s (%s)", event_code, region_code)
+
+    city_venues = []
+    try:
+        city_venues = [v for v in get_city_venues(region_code, region_slug) if isinstance(v, str) and v.strip()]
+    except Exception:
+        log.warning("Could not fetch city venues for %s", region_code)
+
     all_venues = sorted(set(city_venues) | set(movie_venues))
-    release = None if dates else get_release_date(event_code, region_slug, movie_slug)
+
+    release = None
+    if not dates and movie_slug:
+        try:
+            release = get_release_date(event_code, region_slug, movie_slug)
+        except Exception:
+            pass
+
     earliest = max(today, dates[0] if dates else (release or today))
     return {
         "today": today,
@@ -406,7 +427,9 @@ def parse_bms_showtimes(resp: dict) -> dict:
         elif isinstance(o, dict):
             if o.get("type") == "venue-card":
                 v_data = o.get("additionalData", {})
-                v_name = v_data.get("venueName", o.get("id"))
+                v_name = str(v_data.get("venueName") or o.get("id") or "").strip()
+                if not v_name:
+                    return
                 v_code = v_data.get("venueCode", "")
                 shows = {}
 
