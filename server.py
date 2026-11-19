@@ -84,6 +84,11 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         if path == "/api/health":
             return self._json(200, {"status": "ok", "app": "bms-watch"})
 
+        # HTTP Cron endpoint (for external free crons or keep-alive pings)
+        if path == "/api/cron":
+            res = run_check_cycle()
+            return self._json(200, res)
+
         # Reference data
         if path == "/api/regions":
             return self._json(200, POPULAR_REGIONS)
