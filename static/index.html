@@ -64,6 +64,19 @@
 </head>
 <body class="min-h-screen font-sans pb-16 selection:bg-iris selection:text-night">
 
+  <!-- Auth Gate: shown while checking session -->
+  <div id="authGate" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-night p-4 text-center">
+    <svg class="blinker gaze-glow w-16 h-10 mb-4 animate-pulse" viewBox="0 0 48 30" style="--close:15px" aria-hidden="true">
+      <defs><clipPath id="gateClip"><path d="M2 15Q24 -3 46 15Q24 33 2 15Z"/></clipPath></defs>
+      <path d="M2 15Q24 -3 46 15Q24 33 2 15Z" fill="#f3efe6"/>
+      <g clip-path="url(#gateClip)">
+        <circle cx="24" cy="15" r="9" fill="#e39a3b"/><circle cx="24" cy="15" r="4" fill="#000"/><circle cx="26.5" cy="12.5" r="1.6" fill="#fff"/>
+      </g>
+    </svg>
+    <p class="text-xs uppercase tracking-[.25em] text-[#8d879a] font-semibold">Opening eye…</p>
+  </div>
+
+  <div id="appRoot" class="hidden">
   <!-- Header -->
   <header class="sticky top-0 z-40 border-b border-lash bg-night/80 backdrop-blur">
     <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
@@ -243,34 +256,6 @@
       </form>
     </section>
   </main>
-
-  <!-- Auth modal (Supabase, shared project, bms_watch schema) -->
-  <div id="authModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm hidden" onclick="if(event.target===this)closeAuthModal()">
-    <div class="card w-full max-w-md p-6 relative">
-      <button onclick="closeAuthModal()" class="absolute top-4 right-4 text-[#8d879a] hover:text-white" aria-label="Close"><i class="fa-solid fa-xmark text-lg"></i></button>
-      <span id="authBadge" class="text-[10px] tracking-[.15em] uppercase font-bold text-iris">Sign in</span>
-      <h3 id="authTitle" class="font-display text-2xl font-extrabold mt-1">Sign in</h3>
-      <p id="authSubtitle" class="text-sm text-[#8d879a] mt-1 mb-5"></p>
-      <div id="authNotice" class="hidden mb-4 p-3 rounded-lg text-xs leading-relaxed border"></div>
-      <form id="authForm" onsubmit="handleAuthSubmit(event)" class="space-y-4">
-        <div id="authNameField" class="hidden"><label class="label" for="authName">Name</label><input id="authName" class="field" placeholder="Name"></div>
-        <div><label class="label" for="authEmail">Email</label><input type="email" id="authEmail" required class="field" placeholder="you@example.com"></div>
-        <div id="authCodeField" class="hidden">
-          <label class="label !text-iris" for="authCode">Code from your email</label>
-          <input id="authCode" inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10" placeholder="000000" class="field text-center text-lg font-mono tracking-[.4em] font-bold">
-          <p class="text-[11px] text-[#8d879a] mt-1">Check spam too.</p>
-        </div>
-        <div id="authPasswordField"><label class="label" for="authPassword">Password</label><input type="password" id="authPassword" minlength="8" class="field" placeholder="••••••••"></div>
-        <button type="submit" class="btn-primary w-full py-2.5 text-sm"><span id="authBtnText">Sign in</span></button>
-      </form>
-      <button id="authResendBtn" type="button" onclick="handleResendCode()" class="hidden btn-ghost w-full mt-2 py-2 text-xs">Send a new code</button>
-      <hr class="border-lash my-4">
-      <div class="space-y-1 text-center text-xs">
-        <button type="button" id="btnGoOtpDirect" onclick="switchAuthMode('otp-direct')" class="text-iris hover:underline block w-full py-1">Email me a sign-in code instead</button>
-        <button type="button" id="btnGoSignUp" onclick="switchAuthMode('sign-up')" class="text-[#8d879a] hover:text-white block w-full py-1">New here? Create an account</button>
-        <button type="button" id="btnGoSignIn" onclick="switchAuthMode('sign-in')" class="hidden text-iris hover:underline block w-full py-1 font-semibold">Back to sign in</button>
-      </div>
-    </div>
   </div>
 
   <!-- Toast -->
@@ -309,6 +294,13 @@
     }
 
     async function init() {
+      const authed = await checkAuth();
+      if (!authed) return;
+
+      // Reveal authenticated app interface
+      $('authGate')?.remove();
+      $('appRoot')?.classList.remove('hidden');
+
       buildEye();
       showTab(location.hash.slice(1) || 'now');
       document.querySelectorAll('.city-box').forEach(setupCityBox);
@@ -317,8 +309,7 @@
       const regionsReady = loadRegions().then(() => setCity(currentCity, false));
       if (!picked) regionsReady.then(() => locateUser(false));
       loadFormats();
-      await initSupabase();
-      if (!currentSession) setAuthSession(null);
+      loadWatches();
       setInterval(loadWatches, 60000);
     }
 
@@ -743,130 +734,58 @@
       showToast.timer = setTimeout(() => t.classList.add('translate-y-24', 'opacity-0'), 3500);
     }
 
-    // ---------------------------------------------------------------- Supabase auth
-    async function initSupabase() {
+    // ---------------------------------------------------------------- Supabase auth guard
+    async function checkAuth() {
       try {
         const cfg = await (await fetch('/api/config')).json();
-        if (window.supabase && cfg.supabase_url && cfg.supabase_anon_key) {
-          supabaseClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key, { db: { schema: 'bms_watch' } });
-          const { data } = await supabaseClient.auth.getSession();
-          setAuthSession(data.session);
-          supabaseClient.auth.onAuthStateChange((_e, session) => setAuthSession(session));
+        const sb = window.supabase || (typeof supabase !== 'undefined' ? supabase : null);
+        if (!sb || !cfg.supabase_url || !cfg.supabase_anon_key) {
+          window.location.replace('/login');
+          return false;
         }
-      } catch (err) { console.warn('Supabase init skipped:', err); }
+        supabaseClient = sb.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
+          db: { schema: 'bms_watch' }
+        });
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session) {
+          window.location.replace('/login');
+          return false;
+        }
+        currentSession = session;
+        setAuthSession(session);
+        supabaseClient.auth.onAuthStateChange((_e, newSession) => {
+          if (!newSession) window.location.replace('/login');
+          else setAuthSession(newSession);
+        });
+        return true;
+      } catch (err) {
+        window.location.replace('/login');
+        return false;
+      }
     }
 
     function setAuthSession(session) {
       currentSession = session;
       const nav = $('authNavArea'), email = $('fEmail');
       if (session?.user) {
-        const name = session.user.user_metadata?.name || session.user.email.split('@')[0];
-        nav.innerHTML = `<div class="flex items-center gap-2"><span class="hidden sm:inline text-xs text-[#cfc9d8] truncate max-w-[140px]"><i class="fa-solid fa-circle-user text-lens mr-1"></i>${esc(name)}</span><button onclick="handleSignOut()" class="btn-ghost px-3 py-1.5 text-xs">Sign out</button></div>`;
+        nav.innerHTML = `
+          <div class="flex items-center gap-2 bg-lid border border-lash rounded-full pl-3 pr-1 py-1 text-xs">
+            <span class="text-[#cfc9d8] truncate max-w-[150px]"><i class="fa-solid fa-circle-user text-lens mr-1.5"></i>${esc(session.user.email)}</span>
+            <button onclick="handleSignOut()" title="Sign out" class="w-7 h-7 rounded-full bg-lash/60 hover:bg-lash hover:text-white text-[#8d879a] flex items-center justify-center transition">
+              <i class="fa-solid fa-arrow-right-from-bracket text-[11px]"></i>
+            </button>
+          </div>`;
         email.value = session.user.email;
         email.readOnly = true;
-      } else {
-        nav.innerHTML = `<a href="/login" class="btn-primary px-4 py-1.5 text-xs inline-flex items-center gap-1.5"><i class="fa-solid fa-arrow-right-to-bracket text-[11px]"></i><span>Sign in</span></a>`;
-        email.readOnly = false;
       }
-      loadWatches();
     }
 
-    async function handleSignOut() { await supabaseClient?.auth.signOut(); showToast('Signed out.'); }
-    function openAuthModal(mode = 'sign-in') { $('authModal').classList.remove('hidden'); switchAuthMode(mode); }
-    function closeAuthModal() { $('authModal').classList.add('hidden'); }
-
-    const AUTH_COPY = {
-      'sign-in': ['Sign in', 'Welcome back', 'Use your shared Evenly / Supabase account.', 'Sign in'],
-      'sign-up': ['Sign up', 'Create an account', 'We\'ll email you a 6-digit confirmation code.', 'Create account'],
-      'verify': ['Verify', 'Check your email', '', 'Confirm code'],
-      'otp-direct': ['Passwordless', 'Sign in with a code', 'No password needed. We\'ll email you a 6-digit code.', 'Send code'],
-    };
-
-    function switchAuthMode(mode, message = null) {
-      authMode = mode;
-      const [badge, title, sub, btn] = AUTH_COPY[mode];
-      const needsCode = mode === 'verify', needsPassword = mode === 'sign-in' || mode === 'sign-up';
-      $('authBadge').textContent = badge;
-      $('authTitle').textContent = title;
-      $('authSubtitle').textContent = needsCode ? `Enter the code sent to ${$('authEmail').value}.` : sub;
-      $('authBtnText').textContent = btn;
-      $('authEmail').readOnly = needsCode;
-      $('authNameField').classList.toggle('hidden', mode !== 'sign-up');
-      $('authCodeField').classList.toggle('hidden', !needsCode);
-      $('authPasswordField').classList.toggle('hidden', !needsPassword);
-      $('authPassword').required = needsPassword;
-      $('authCode').required = needsCode;
-      $('authResendBtn').classList.toggle('hidden', !needsCode);
-      $('btnGoSignIn').classList.toggle('hidden', mode === 'sign-in');
-      $('btnGoSignUp').classList.toggle('hidden', mode !== 'sign-in');
-      $('btnGoOtpDirect').classList.toggle('hidden', mode !== 'sign-in');
-      setAuthNotice(message);
-      if (needsCode) startCooldown(60);
-    }
-
-    function setAuthNotice(msg, isError = false) {
-      const el = $('authNotice');
-      el.classList.toggle('hidden', !msg);
-      if (!msg) return;
-      el.className = `mb-4 p-3 rounded-lg text-xs leading-relaxed border ${isError ? 'bg-red-950/60 border-red-800 text-red-200' : 'bg-teal-950/60 border-teal-800 text-teal-200'}`;
-      el.textContent = msg;
-    }
-
-    function startCooldown(sec) {
-      const btn = $('authResendBtn');
-      clearInterval(cooldownTimer);
-      btn.disabled = true;
-      const tick = () => {
-        btn.textContent = sec > 0 ? `Send a new code (${sec}s)` : 'Send a new code';
-        if (sec-- <= 0) { clearInterval(cooldownTimer); btn.disabled = false; }
-      };
-      tick();
-      cooldownTimer = setInterval(tick, 1000);
-    }
-
-    async function handleAuthSubmit(e) {
-      e.preventDefault();
-      if (!supabaseClient) return setAuthNotice('Sign-in is not configured on this server.', true);
-      const email = $('authEmail').value.trim(), password = $('authPassword').value;
-      try {
-        if (authMode === 'sign-in') {
-          const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (error) {
-            if (error.code === 'email_not_confirmed' || error.message.includes('not confirmed')) return switchAuthMode('verify', 'Confirm your email first.');
-            throw error;
-          }
-          closeAuthModal(); showToast('Welcome back.');
-        } else if (authMode === 'sign-up') {
-          const { data, error } = await supabaseClient.auth.signUp({ email, password, options: { data: { app: 'bms_watch', name: $('authName').value.trim() } } });
-          if (error) throw error;
-          if (!data.session) switchAuthMode('verify', `We sent a code to ${email}.`);
-          else { closeAuthModal(); showToast('Account created.'); }
-        } else if (authMode === 'verify') {
-          const token = $('authCode').value.trim();
-          let res = await supabaseClient.auth.verifyOtp({ email, token, type: 'signup' });
-          if (res.error) res = await supabaseClient.auth.verifyOtp({ email, token, type: 'email' });
-          if (res.error) throw res.error;
-          closeAuthModal(); showToast('Verified and signed in.');
-        } else if (authMode === 'otp-direct') {
-          const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { data: { app: 'bms_watch' } } });
-          if (error) throw error;
-          switchAuthMode('verify', `Code sent to ${email}.`);
-        }
-      } catch (err) { setAuthNotice(err.message || 'Authentication error', true); }
-    }
-
-    async function handleResendCode() {
-      const email = $('authEmail').value.trim();
-      try {
-        const { error } = await supabaseClient.auth.resend({ type: 'signup', email });
-        if (error) throw error;
-        setAuthNotice(`A fresh code was sent to ${email}.`);
-        startCooldown(60);
-      } catch (err) { setAuthNotice(err.message || 'Could not resend the code', true); }
+    async function handleSignOut() {
+      if (supabaseClient) await supabaseClient.auth.signOut();
+      window.location.replace('/login');
     }
 
     window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAuthModal(); });
     document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>

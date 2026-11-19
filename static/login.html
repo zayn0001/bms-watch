@@ -124,30 +124,6 @@
           <button type="button" onclick="switchToEmailStep()" class="text-[#8d879a] hover:text-white px-2 py-2 underline underline-offset-4">Change email</button>
         </div>
       </form>
-
-      <!-- Mode 3: Password Fallback Form -->
-      <form id="formPassword" onsubmit="handlePasswordLogin(event)" class="hidden space-y-4">
-        <div>
-          <label class="label" for="inpPwdEmail">Email address</label>
-          <input type="email" id="inpPwdEmail" required autocomplete="email" placeholder="you@example.com" class="field">
-        </div>
-        <div>
-          <label class="label" for="inpPassword">Password</label>
-          <input type="password" id="inpPassword" required minlength="8" autocomplete="current-password" placeholder="••••••••" class="field">
-        </div>
-        <button id="btnPasswordLogin" type="submit" class="btn-primary w-full py-3 text-sm flex items-center justify-center gap-2">
-          <i class="fa-solid fa-arrow-right-to-bracket text-xs"></i>
-          <span>Sign in</span>
-        </button>
-      </form>
-
-      <!-- Footnote toggles -->
-      <hr class="border-lash my-5">
-      <div id="footerLinks" class="text-center text-xs space-y-2">
-        <button id="togglePasswordMode" type="button" onclick="togglePasswordMode()" class="text-iris hover:underline">
-          Sign in with password instead
-        </button>
-      </div>
     </div>
   </main>
 
@@ -160,7 +136,6 @@
     let supabaseClient = null;
     let targetEmail = '';
     let cooldownTimer = null;
-    let isPasswordMode = false;
     let initPromise = null;
     let turnstileToken = null;
     let turnstileWidgetId = null;
@@ -184,7 +159,7 @@
     // Friendly error messaging (reference: Evenly)
     function friendlyError(msg) {
       if (!msg) return 'An error occurred. Please try again.';
-      if (/invalid login credentials/i.test(msg)) return 'That email and password do not match.';
+      if (/invalid login credentials/i.test(msg)) return 'Invalid or expired sign-in credentials.';
       if (/expired|invalid/i.test(msg) && /otp|token|code/i.test(msg)) return 'That code is wrong or has expired. Check the latest email, or send a new code.';
       if (/rate limit|security purposes|too many/i.test(msg)) return 'Too many attempts just now. Wait a minute and try again.';
       if (/captcha/i.test(msg)) return 'The human verification check didn’t go through. Please try again.';
@@ -321,7 +296,6 @@
 
     function switchToOtpStep() {
       $('formEmail').classList.add('hidden');
-      $('formPassword').classList.add('hidden');
       $('formOtp').classList.remove('hidden');
 
       $('authDocket').textContent = 'Check your email';
@@ -333,12 +307,10 @@
       $('inpOtp').value = '';
       setTimeout(() => $('inpOtp').focus(), 100);
       startCooldown(60);
-      $('togglePasswordMode').classList.add('hidden');
     }
 
     function switchToEmailStep() {
       $('formOtp').classList.add('hidden');
-      $('formPassword').classList.add('hidden');
       $('formEmail').classList.remove('hidden');
 
       $('authDocket').textContent = 'Sign in';
@@ -347,9 +319,6 @@
 
       showNotice('');
       $('inpEmail').focus();
-      $('togglePasswordMode').classList.remove('hidden');
-      $('togglePasswordMode').textContent = 'Sign in with password instead';
-      isPasswordMode = false;
     }
 
     // Auto-submit OTP when 6 numbers are typed or pasted
@@ -434,49 +403,6 @@
       };
       tick();
       cooldownTimer = setInterval(tick, 1000);
-    }
-
-    // Password fallback
-    function togglePasswordMode() {
-      isPasswordMode = !isPasswordMode;
-      showNotice('');
-      if (isPasswordMode) {
-        $('formEmail').classList.add('hidden');
-        $('formOtp').classList.add('hidden');
-        $('formPassword').classList.remove('hidden');
-        $('authDocket').textContent = 'Password';
-        $('authTitle').textContent = 'Sign in with password';
-        $('authSubtitle').textContent = 'Use your existing password for Evenly / BMS Watch.';
-        $('togglePasswordMode').textContent = 'Email me a sign-in code instead';
-        $('inpPwdEmail').value = $('inpEmail').value;
-        $('inpPwdEmail').focus();
-      } else {
-        switchToEmailStep();
-      }
-    }
-
-    async function handlePasswordLogin(e) {
-      e.preventDefault();
-      const email = $('inpPwdEmail').value.trim();
-      const password = $('inpPassword').value;
-      const ready = await ensureClientReady();
-      if (!ready) return showNotice('Authentication client is not ready. Please refresh the page.', true);
-
-      const btn = $('btnPasswordLogin');
-      btn.disabled = true;
-      btn.querySelector('span').textContent = 'Signing in…';
-
-      try {
-        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        showNotice('Welcome back! Taking you in…');
-        setTimeout(() => { window.location.replace(redirectUrl); }, 500);
-      } catch (err) {
-        showNotice(friendlyError(err.message), true);
-      } finally {
-        btn.disabled = false;
-        btn.querySelector('span').textContent = 'Sign in';
-      }
     }
 
     initPromise = init();
