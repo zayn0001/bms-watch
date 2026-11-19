@@ -4,8 +4,12 @@ Supports two methods:
 1. Supabase Access Token (SUPABASE_ACCESS_TOKEN): via Supabase Management API.
 2. PostgreSQL Session Pooler (POSTGRES_PASSWORD or DATABASE_URL): via psql CLI.
 
+Applies every file in supabase/migrations in filename order, so each migration
+must be safe to re-run (use IF [NOT] EXISTS). Stops at the first failure.
+
 Usage:
-  python scripts/db_push.py
+  python scripts/db_push.py                 # all migrations
+  python scripts/db_push.py 2026111912*.sql # only matching files
 """
 import getpass
 import json
@@ -16,7 +20,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-MIGRATION_FILE = ROOT_DIR / "supabase" / "migrations" / "20261119000000_bms_watch_schema.sql"
+MIGRATIONS_DIR = ROOT_DIR / "supabase" / "migrations"
 ENV_FILE = ROOT_DIR / ".env"
 
 if ENV_FILE.exists():
@@ -84,11 +88,12 @@ def run_via_psql(db_password: str, sql_file: Path) -> bool:
 
 
 def main():
-    if not MIGRATION_FILE.exists():
-        print(f"Migration file not found: {MIGRATION_FILE}")
+    patterns = sys.argv[1:] or ["*.sql"]
+    files = sorted({f for pat in patterns for f in MIGRATIONS_DIR.glob(pat)})
+    if not files:
+        print(f"No migrations matching {patterns} in {MIGRATIONS_DIR}")
         sys.exit(1)
-
-    sql = MIGRATION_FILE.read_text(encoding="utf-8")
+    print("Migrations to apply:", ", ".join(f.name for f in files))
 
     token = os.getenv("SUPABASE_ACCESS_TOKEN")
     db_pass = os.getenv("POSTGRES_PASSWORD")
@@ -107,16 +112,17 @@ def main():
         else:
             db_pass = getpass.getpass("Enter Database Password: ").strip()
 
-    if token:
-        success = run_via_api(token, sql)
-    elif db_pass:
-        success = run_via_psql(db_pass, MIGRATION_FILE)
-    else:
+    if not token and not db_pass:
         print("No valid credentials provided.")
         sys.exit(1)
 
-    if not success:
-        sys.exit(1)
+    for f in files:
+        print(f"--- {f.name}")
+        ok = run_via_api(token, f.read_text(encoding="utf-8")) if token else run_via_psql(db_pass, f)
+        if not ok:
+            print(f"Stopped at {f.name}; later migrations were not applied.")
+            sys.exit(1)
+    print(f"All {len(files)} migration(s) applied.")
 
 
 if __name__ == "__main__":
