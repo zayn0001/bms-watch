@@ -143,8 +143,9 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                 movies = search_bms_movies(q, qs.get("region", ["COIM"])[0], qs.get("slug", [""])[0].lower())
             except Exception:
                 log.exception("search failed for %r", q)
-                return self._json(502, {"error": "Couldn't reach BookMyShow"})
-            return self._json(200, movies, headers={"Cache-Control": "public, max-age=300"})
+                return self._json(502, {"error": "Couldn't reach BookMyShow"}, headers={"Cache-Control": "no-store"})
+            # Only cache real results, so a retry of the same words always asks BookMyShow again.
+            return self._json(200, movies, headers={"Cache-Control": "public, max-age=300" if movies else "no-store"})
 
         if path == "/api/formats":
             return self._json(200, POPULAR_FORMATS)

@@ -339,11 +339,27 @@ def search_bms_movies(query: str, region_code: str = "COIM", region_slug: str = 
     """Films matching `query` from BookMyShow's own search box, including ones not yet listed as upcoming."""
     import uuid
     region_code = (region_code or "COIM").upper()
-    headers = dict(BMS_HEADERS, **{"x-region-code": region_code, "x-region-slug": resolve_region_slug(region_code, region_slug), "x-bms-id": str(uuid.uuid4())})
+    region_slug = resolve_region_slug(region_code, region_slug)
     url = "https://in.bookmyshow.com/api/v1/search/dynamic?" + urllib.parse.urlencode({"q": query, "instant": "true", "firstLoad": "false"})
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as r:
-        d = json.load(r)
-    cards = (((d.get("data") or {}).get("widgets") or {}).get("search-vi-v2-results") or {}).get("data", {}).get("cards", {}).get("data", [])
+    # BookMyShow sometimes errors or sends a reply without results; retry those. A real
+    # no-match says totalHits: 0 and is returned as [] straight away.
+    for attempt in range(3):
+        try:
+            headers = dict(BMS_HEADERS, **{"x-region-code": region_code, "x-region-slug": region_slug, "x-bms-id": str(uuid.uuid4())})
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=8) as r:
+                d = json.load(r)
+            if (d.get("metadata") or {}).get("totalHits") == 0:
+                return []
+            cards = (((d.get("data") or {}).get("widgets") or {}).get("search-vi-v2-results") or {}).get("data", {}).get("cards", {}).get("data", [])
+            if cards:
+                break
+            err = RuntimeError("search reply had no results")
+        except Exception as e:
+            err = e
+        log.warning("BMS search %r attempt %d failed: %s", query, attempt + 1, err)
+        time.sleep(0.5 * (attempt + 1))
+    else:
+        raise err
     movies = []
     for c in cards:
         x = c.get("data") or {}

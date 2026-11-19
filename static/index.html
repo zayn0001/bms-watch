@@ -172,7 +172,7 @@
     <!-- Search any film -->
     <div class="relative mb-4">
       <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8d879a] text-sm pointer-events-none"></i>
-      <input id="filmSearch" type="search" autocomplete="off" spellcheck="false" oninput="onSearchInput()" placeholder="Search any film on BookMyShow, even ones months away" aria-label="Search films" class="field !pl-10 !py-3 !text-sm">
+      <input id="filmSearch" type="search" autocomplete="off" spellcheck="false" oninput="onSearchInput()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); onSearchInput(0); }" placeholder="Search any film on BookMyShow, even ones months away" aria-label="Search films" class="field !pl-10 !py-3 !text-sm">
     </div>
 
     <!-- Tabs -->
@@ -514,8 +514,9 @@
     }
 
     // Search BookMyShow as you type (it needs 3+ characters); stale replies are dropped.
+    // Enter or "Try again" calls it with delay 0 to rerun the same words.
     let searchTimer = null, searchSeq = 0;
-    function onSearchInput() {
+    function onSearchInput(delay = 300) {
       clearTimeout(searchTimer);
       const q = $('filmSearch').value.trim();
       if (!q) return showTab(lastBrowseTab === 'search' ? 'now' : lastBrowseTab);
@@ -533,9 +534,11 @@
           $('grid-search').innerHTML = movieCards('search', movies);
           $('searchNote').textContent = movies.length ? 'Tap one to start watching it.' : `No films on BookMyShow match “${q}”.`;
         } catch {
-          if (seq === searchSeq) $('searchNote').textContent = "Couldn't reach BookMyShow. Try again in a moment.";
+          if (seq !== searchSeq) return;
+          $('grid-search').innerHTML = `<div class="col-span-full text-center py-12"><p class="text-red-300 text-sm mb-3">Couldn't reach BookMyShow.</p><button type="button" onclick="onSearchInput(0)" class="btn-ghost px-4 py-2 text-xs"><i class="fa-solid fa-rotate mr-1"></i>Try again</button></div>`;
+          $('searchNote').textContent = 'BookMyShow didn’t answer that time.';
         }
-      }, 300);
+      }, delay);
     }
 
     async function onFilmChange() {
