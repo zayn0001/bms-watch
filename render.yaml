@@ -17,8 +17,6 @@ services:
         value: https://bms-watch.onrender.com
       - key: DATA_DIR
         value: /data
-      - key: POLL_INTERVAL
-        value: "180"
       # Supabase Auth & User Database (Shared with evenly)
       - key: SUPABASE_URL
         value: https://ismyhkcsxrswqsfzfrxe.supabase.co

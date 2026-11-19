@@ -110,7 +110,6 @@ This repository includes a [`render.yaml`](./render.yaml) file configured for Re
 | :--- | :--- | :--- |
 | `PORT` | Service port | `10000` |
 | `DATA_DIR` | Local container directory | `/data` |
-| `POLL_INTERVAL` | Background check frequency in seconds | `180` |
 | `MIRROR_ENDPOINT` | Supabase Storage S3 endpoint | `https://<ref>.storage.supabase.co/storage/v1/s3` |
 | `MIRROR_BUCKET` | Supabase bucket name | `default` |
 | `MIRROR_PREFIX` | App folder prefix in bucket | `bms_watch/` |
