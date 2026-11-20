@@ -74,7 +74,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         if headers:
             for k, v in headers.items():
@@ -91,10 +91,50 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
         rows = sb("GET", f"watches?id=eq.{wid}&select=id,is_active,user_id")
         return rows[0] if rows and (user["admin"] or rows[0]["user_id"] == user["id"]) else None
 
+    def _handle_watch_update(self, wid: str, payload: dict):
+        user = self._user()
+        if not user:
+            return self._json(401, {"error": "Sign in first"})
+        w = self._owned_watch(user, wid)
+        if not w:
+            return self._json(404, {"error": "No such watch"})
+
+        updates = {}
+        if "dates" in payload:
+            dates = payload["dates"]
+            if not dates or not isinstance(dates, list):
+                return self._json(400, {"error": "At least one date (YYYYMMDD) is required"})
+            if not all(isinstance(d, str) and re.fullmatch(r"\d{8}", d) for d in dates):
+                return self._json(400, {"error": "Dates must be YYYYMMDD strings"})
+            if min(dates) < today_ist():
+                return self._json(400, {"error": "Dates can't be in the past"})
+            updates["dates"] = sorted(dates)
+
+        if "cinemas" in payload and isinstance(payload["cinemas"], list):
+            updates["cinemas"] = payload["cinemas"]
+        if "formats" in payload and isinstance(payload["formats"], list):
+            updates["formats"] = payload["formats"]
+        if "prime_seats_only" in payload:
+            updates["prime_seats_only"] = bool(payload["prime_seats_only"])
+        if "min_seats_together" in payload:
+            updates["min_seats_together"] = max(1, int(payload["min_seats_together"] or 1))
+        if "is_active" in payload:
+            updates["is_active"] = bool(payload["is_active"])
+        if "movie_title" in payload and payload["movie_title"]:
+            updates["movie_title"] = payload["movie_title"]
+        if "language" in payload and payload["language"]:
+            updates["language"] = payload["language"].strip().lower()
+
+        if not updates:
+            return self._json(400, {"error": "No valid fields provided to update"})
+
+        res = sb("PATCH", f"watches?id=eq.{wid}", updates, prefer="return=representation")
+        return self._json(200, {"status": "updated", "watch": res[0] if res else {}})
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
@@ -201,6 +241,18 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             watches = sb("GET", query)
             return self._json(200, watches, headers={"X-Admin": "1"} if user["admin"] else None)
 
+        # Single watch lookup
+        match_watch = re.match(r"^/api/watches/([0-9a-fA-F-]{36})$", path)
+        if match_watch:
+            user = self._user()
+            if not user:
+                return self._json(401, {"error": "Sign in first"})
+            wid = match_watch.group(1).lower()
+            rows = sb("GET", f"watches?id=eq.{wid}&select=*")
+            if not rows or (not user["admin"] and rows[0]["user_id"] != user["id"]):
+                return self._json(404, {"error": "No such watch"})
+            return self._json(200, rows[0])
+
         # Serve login / sign-in page
         if path in ("/login", "/login.html", "/sign-in", "/sign-in.html"):
             login_path = STATIC_DIR / "login.html"
@@ -293,7 +345,31 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             sb("PATCH", f"watches?id=eq.{wid}", {"is_active": not w["is_active"]})
             return self._json(200, {"status": "ok", "watch_id": wid})
 
+        # Update Watch via POST
+        match_update = re.match(r"^/api/watches/([0-9a-fA-F-]{36})$", path)
+        if match_update:
+            return self._handle_watch_update(match_update.group(1).lower(), payload)
+
         return self._json(404, {"error": "Route not found"})
+
+    def do_PUT(self):
+        url = urllib.parse.urlparse(self.path)
+        path = url.path.rstrip("/")
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length).decode("utf-8") if length else "{}"
+        try:
+            payload = json.loads(body) if body else {}
+        except Exception:
+            payload = {}
+
+        m = re.match(r"^/api/watches/([0-9a-fA-F-]{36})$", path)
+        if m:
+            return self._handle_watch_update(m.group(1).lower(), payload)
+
+        return self._json(404, {"error": "Route not found"})
+
+    def do_PATCH(self):
+        return self.do_PUT()
 
     def do_DELETE(self):
         url = urllib.parse.urlparse(self.path)

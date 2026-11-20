@@ -19,7 +19,7 @@ create table if not exists bms_watch.watches (
     cinemas jsonb default '[]'::jsonb,
     formats jsonb default '[]'::jsonb,
     prime_seats_only boolean default false,
-    min_seats_together integer default 2,
+    min_seats_together integer default 1,
     email text not null,
     is_active boolean default true,
     created_at timestamptz default now(),

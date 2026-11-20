@@ -282,6 +282,86 @@
   </main>
   </div>
 
+  <!-- Edit Watch Modal -->
+  <div id="editModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+    <div class="card p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto space-y-5 border-lash shadow-2xl relative" onclick="event.stopPropagation()">
+      <div class="flex items-start justify-between gap-3 border-b border-lash pb-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-iris">Edit Watch</span>
+            <span id="editWatchCity" class="text-xs px-2 py-0.5 rounded-full bg-lid border border-lash text-[#cfc9d8]"></span>
+          </div>
+          <h2 id="editWatchTitle" class="font-display text-xl font-extrabold text-white mt-1"></h2>
+        </div>
+        <button type="button" onclick="closeEditModal()" class="w-8 h-8 rounded-full border border-lash hover:border-iris hover:text-white text-[#8d879a] flex items-center justify-center transition">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <!-- Dates -->
+      <div>
+        <label class="label">Dates to watch</label>
+        <p id="editDateNote" class="text-xs text-[#8d879a] mb-2"></p>
+        <div id="editDateGrid" class="flex flex-wrap gap-1.5"></div>
+        <div class="flex gap-2 mt-2 max-w-xs">
+          <input type="date" id="editDatePick" class="field [color-scheme:dark]" aria-label="Add custom date">
+          <button type="button" onclick="addEditPickedDate()" class="btn-ghost px-3 text-xs shrink-0">Add</button>
+        </div>
+      </div>
+
+      <!-- Cinemas -->
+      <div>
+        <label class="label">Cinemas</label>
+        <details id="editCinemaPicker" class="relative">
+          <summary class="field cursor-pointer list-none flex items-center justify-between gap-2 select-none">
+            <span id="editCinemaSummary" class="truncate">All cinemas</span><i class="fa-solid fa-chevron-down text-xs text-[#8d879a]"></i>
+          </summary>
+          <div class="absolute left-0 right-0 top-full mt-2 card p-2 z-30 shadow-2xl">
+            <input id="editCinemaFilter" oninput="renderEditCinemas()" placeholder="Filter cinemas" class="field mb-2 !py-1.5">
+            <div id="editCinemaList" class="max-h-56 overflow-auto"></div>
+            <div class="flex justify-between items-center pt-2 mt-1 border-t border-lash text-xs">
+              <button type="button" onclick="editSelectedCinemas.clear(); renderEditCinemas()" class="text-iris hover:underline">Clear (all cinemas)</button>
+              <button type="button" onclick="$('editCinemaPicker').open = false" class="btn-ghost px-3 py-1">Done</button>
+            </div>
+          </div>
+        </details>
+        <p id="editCinemaNote" class="text-xs text-[#8d879a] mt-1.5"></p>
+      </div>
+
+      <!-- Formats -->
+      <div>
+        <label class="label">Screen formats <span class="normal-case tracking-normal font-normal">(none = any)</span></label>
+        <div id="editFormatChips" class="flex flex-wrap gap-1.5"></div>
+      </div>
+
+      <!-- Prime Seating -->
+      <div class="card p-3 border-[#24212e] bg-[#0b0a10] flex flex-col gap-2">
+        <label class="flex items-center gap-2.5 cursor-pointer text-xs select-none">
+          <input type="checkbox" id="editPrimeSeats" onchange="$('editMinSeatsWrap').classList.toggle('hidden', !this.checked)" class="rounded w-4 h-4 accent-[#e39a3b] cursor-pointer">
+          <span class="font-semibold text-white"><i class="fa-solid fa-crown text-iris mr-1"></i>Prime Seating Only</span>
+          <span class="text-[#8d879a]">(Middle rows &amp; center seats)</span>
+        </label>
+        <div id="editMinSeatsWrap" class="hidden flex items-center gap-2 pl-6 text-xs text-[#cfc9d8]">
+          <label for="editMinSeats" class="text-[#8d879a]">Min. adjacent seats:</label>
+          <select id="editMinSeats" class="bg-[#14121b] border border-[#2d2a38] rounded px-2 py-0.5 text-xs text-white">
+            <option value="1">1 seat</option>
+            <option value="2">2 seats together</option>
+            <option value="3">3 seats together</option>
+            <option value="4">4 seats together</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="flex items-center justify-end gap-3 pt-3 border-t border-lash">
+        <button type="button" onclick="closeEditModal()" class="btn-ghost px-4 py-2 text-sm">Cancel</button>
+        <button type="button" id="saveEditBtn" onclick="saveWatchEdit()" class="btn-primary px-5 py-2 text-sm flex items-center gap-2">
+          <i class="fa-solid fa-check"></i>Save changes
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" role="status" aria-live="polite" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 translate-y-24 opacity-0 transition-all duration-300 card px-4 py-3 text-sm flex items-center gap-2 shadow-2xl">
     <i id="toastIcon" class="fa-solid fa-eye text-lens"></i><span id="toastMessage"></span>
@@ -294,6 +374,13 @@
     let regions = [];
     let cityVenues = [];
     let loadingVenues = false;
+    let allWatchesCache = [];
+    let editingWatch = null;
+    let editSelectedDates = new Set();
+    let editSelectedCinemas = new Set();
+    let editSelectedFormats = new Set();
+    let editMovieInfo = null;
+    let editCityVenues = [];
     const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
                     set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
     let selectedFormats = new Set();
@@ -704,7 +791,15 @@
     }
     document.addEventListener('click', e => {
       const d = $('cinemaPicker');
-      if (d.open && !d.contains(e.target)) d.open = false;
+      if (d && d.open && !d.contains(e.target)) d.open = false;
+      const ed = $('editCinemaPicker');
+      if (ed && ed.open && !ed.contains(e.target)) ed.open = false;
+      if (e.target === $('editModal')) closeEditModal();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !$('editModal').classList.contains('hidden')) {
+        closeEditModal();
+      }
     });
 
     // ---------------------------------------------------------------- watches
@@ -722,6 +817,7 @@
         isAdmin = res.headers.get('X-Admin') === '1';
         watches = await res.json();
       } catch { return; }
+      allWatchesCache = watches;
       $('watchHeading').textContent = isAdmin ? "Everyone's watches" : 'Your watchlist';
 
       const open = watches.filter(w => w.is_active);
@@ -744,6 +840,9 @@
               <p class="text-xs text-[#8d879a] mt-0.5"><i class="fa-solid fa-location-dot mr-1"></i>${esc(w.region_slug.replace(/-/g, ' '))}</p>
             </div>
             <div class="flex items-center gap-1 shrink-0">
+              <button onclick="openEditModal('${w.id}')" title="Edit watch" class="w-9 h-9 rounded-full border border-lash hover:border-iris hover:text-iris text-[#8d879a] transition flex items-center justify-center">
+                <i class="fa-solid fa-pen-to-square text-sm"></i>
+              </button>
               <button onclick="toggleWatch('${w.id}')" title="${w.is_active ? 'Close this eye (pause)' : 'Open this eye (resume)'}" class="w-9 h-9 rounded-full border border-lash hover:border-iris transition ${w.is_active ? 'text-lens' : 'text-[#8d879a]'}">
                 <i class="fa-solid ${w.is_active ? 'fa-eye' : 'fa-eye-slash'}"></i>
               </button>
@@ -806,6 +905,201 @@
       if (!confirm('Stop watching and delete this?')) return;
       await authFetch(`/api/watches/${id}`, { method: 'DELETE' });
       loadWatches();
+    }
+
+    async function openEditModal(id) {
+      const w = allWatchesCache.find(x => x.id === id);
+      if (!w) return;
+      editingWatch = w;
+      editSelectedDates = new Set(w.dates || []);
+      editSelectedCinemas = new Set(w.cinemas || []);
+      editSelectedFormats = new Set(w.formats || []);
+      editMovieInfo = null;
+      editCityVenues = [];
+
+      $('editWatchTitle').textContent = w.movie_title;
+      $('editWatchCity').textContent = (w.region_slug || w.region_code).replace(/-/g, ' ');
+      $('editPrimeSeats').checked = !!w.prime_seats_only;
+      $('editMinSeats').value = String(w.min_seats_together || 1);
+      $('editMinSeatsWrap').classList.toggle('hidden', !w.prime_seats_only);
+      $('editCinemaFilter').value = '';
+
+      try {
+        const formats = await (await fetch('/api/formats')).json();
+        $('editFormatChips').innerHTML = formats.map(f => {
+          const active = editSelectedFormats.has(f);
+          return `<button type="button" class="chip ${active ? 'on' : ''}" data-f="${esc(f)}" onclick="toggleEditFormat(this)">${esc(f)}</button>`;
+        }).join('');
+      } catch (err) {
+        console.error('edit formats', err);
+      }
+
+      $('editModal').classList.remove('hidden');
+      document.body.classList.add('overflow-hidden');
+
+      loadEditMovieInfo(w);
+    }
+
+    async function loadEditMovieInfo(w) {
+      $('editDateNote').textContent = 'Checking BookMyShow for dates…';
+      $('editCinemaNote').textContent = 'Checking BookMyShow for cinemas…';
+      renderEditDates();
+      renderEditCinemas();
+
+      const q = new URLSearchParams({
+        event: w.event_code,
+        region: w.region_code,
+        slug: w.region_slug,
+        movie_slug: w.movie_slug || '',
+        language: w.language || ''
+      });
+
+      try {
+        const res = await fetch(`/api/bms/movie-info?${q}`);
+        if (res.ok) {
+          editMovieInfo = await res.json();
+        }
+      } catch (err) {
+        console.warn('edit movie-info fetch failed', err);
+      }
+
+      try {
+        const resV = await fetch(`/api/bms/venues?region=${encodeURIComponent(w.region_code)}&slug=${encodeURIComponent(w.region_slug)}`);
+        if (resV.ok) {
+          editCityVenues = await resV.json();
+        }
+      } catch (err) {
+        console.warn('edit venues fetch failed', err);
+      }
+
+      renderEditDates();
+      renderEditCinemas();
+    }
+
+    function renderEditDates() {
+      const grid = $('editDateGrid');
+      const start = editMovieInfo?.earliest_date || ymd(new Date());
+      const open = editMovieInfo?.bookable_dates || [];
+      $('editDatePick').min = ymdToIso(start);
+
+      if (editMovieInfo && !editMovieInfo.fallback) {
+        $('editDateNote').textContent = open.length
+          ? `${open.length} date(s) currently open for booking on BMS. Pick any to watch.`
+          : "Bookings aren't open yet; pick dates to watch.";
+      } else {
+        $('editDateNote').textContent = "Pick dates to watch for shows and seats.";
+      }
+
+      const days = new Set(Array.from({ length: 14 }, (_, i) => addDays(start, i)));
+      editSelectedDates.forEach(d => days.add(d));
+
+      grid.innerHTML = [...days].sort().map(d => `
+        <button type="button" onclick="toggleEditDate('${d}')" class="chip ${editSelectedDates.has(d) ? 'on' : ''}" aria-pressed="${editSelectedDates.has(d)}">
+          ${prettyDate(d)}${open.includes(d) ? `<span class="w-1.5 h-1.5 rounded-full ${editSelectedDates.has(d) ? 'bg-night' : 'bg-lens'}" title="Bookings open"></span>` : ''}
+        </button>`).join('');
+    }
+
+    function toggleEditDate(d) {
+      editSelectedDates.has(d) ? editSelectedDates.delete(d) : editSelectedDates.add(d);
+      renderEditDates();
+    }
+
+    function addEditPickedDate() {
+      const v = $('editDatePick').value;
+      if (!v) return;
+      const dStr = isoToYmd(v);
+      if (dStr < ymd(new Date())) return showToast("Can't pick a date in the past.", true);
+      editSelectedDates.add(dStr);
+      $('editDatePick').value = '';
+      renderEditDates();
+    }
+
+    function renderEditCinemas() {
+      const venues = (editMovieInfo?.venues?.length ? editMovieInfo.venues : editCityVenues) || [];
+      const openVenues = new Set(editMovieInfo?.movie_venues || []);
+      const f = ($('editCinemaFilter')?.value || '').trim().toLowerCase();
+      const filtered = venues.filter(v => v.toLowerCase().includes(f));
+
+      if (filtered.length) {
+        $('editCinemaList').innerHTML = filtered.map(v => {
+          const isOpen = openVenues.has(v);
+          return `
+            <label class="flex items-center justify-between gap-2.5 px-2 py-1.5 rounded-lg hover:bg-lash cursor-pointer text-sm">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <input type="checkbox" class="accent-[#e39a3b] shrink-0" ${editSelectedCinemas.has(v) ? 'checked' : ''} onchange="this.checked ? editSelectedCinemas.add(this.value) : editSelectedCinemas.delete(this.value); renderEditCinemaSummary()" value="${esc(v)}">
+                <span class="truncate">${esc(v)}</span>
+              </div>
+              ${isOpen ? `<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-lens/15 text-lens font-semibold">open</span>` : ''}
+            </label>`;
+        }).join('');
+      } else if (venues.length) {
+        $('editCinemaList').innerHTML = `<p class="px-2 py-2 text-sm text-[#8d879a]">No cinema matches "${esc(f)}".</p>`;
+      } else {
+        $('editCinemaList').innerHTML = `<p class="px-2 py-2 text-sm text-[#8d879a]">Loading cinemas…</p>`;
+      }
+
+      $('editCinemaNote').textContent = editSelectedCinemas.size
+        ? `Watching ${editSelectedCinemas.size} cinema(s). Leave empty to watch all.`
+        : `All cinemas in this city are watched.`;
+
+      renderEditCinemaSummary();
+    }
+
+    function renderEditCinemaSummary() {
+      const n = editSelectedCinemas.size, first = [...editSelectedCinemas][0];
+      $('editCinemaSummary').textContent = !n ? 'All cinemas' : n === 1 ? first : `${n} cinemas: ${first} +${n - 1}`;
+    }
+
+    function toggleEditFormat(btn) {
+      const f = btn.dataset.f;
+      editSelectedFormats.has(f) ? editSelectedFormats.delete(f) : editSelectedFormats.add(f);
+      btn.classList.toggle('on', editSelectedFormats.has(f));
+    }
+
+    function closeEditModal() {
+      $('editModal').classList.add('hidden');
+      document.body.classList.remove('overflow-hidden');
+      editingWatch = null;
+      editMovieInfo = null;
+      editCityVenues = [];
+    }
+
+    async function saveWatchEdit() {
+      if (!editingWatch) return;
+      if (!editSelectedDates.size) return showToast('Pick at least one date.', true);
+
+      const btn = $('saveEditBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>Saving…';
+
+      const payload = {
+        dates: [...editSelectedDates].sort(),
+        cinemas: [...editSelectedCinemas],
+        formats: [...editSelectedFormats],
+        prime_seats_only: !!$('editPrimeSeats')?.checked,
+        min_seats_together: parseInt($('editMinSeats')?.value || '1', 10),
+      };
+
+      try {
+        const res = await authFetch(`/api/watches/${editingWatch.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Failed to update watch.', true);
+          return;
+        }
+        showToast(`Updated watch for ${editingWatch.movie_title}.`);
+        closeEditModal();
+        loadWatches();
+      } catch (err) {
+        showToast('Network error while saving.', true);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>Save changes';
+      }
     }
 
     async function triggerManualCheck() {
