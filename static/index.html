@@ -257,6 +257,23 @@
 
         <div><span class="label">Screen formats <span class="normal-case tracking-normal font-normal">(none = any)</span></span><div id="formatChips" class="flex flex-wrap gap-1.5"></div></div>
 
+        <div class="card p-3 border-[#24212e] bg-[#14121b]/60 flex flex-col gap-2">
+          <label class="flex items-center gap-2.5 cursor-pointer text-xs select-none">
+            <input type="checkbox" id="fPrimeSeats" onchange="$('minSeatsWrap').classList.toggle('hidden', !this.checked)" class="rounded w-4 h-4 accent-[#e39a3b] cursor-pointer">
+            <span class="font-semibold text-white"><i class="fa-solid fa-crown text-iris mr-1"></i>Prime Seating Only</span>
+            <span class="text-[#8d879a]">(Sweet spot: middle rows &amp; center seats)</span>
+          </label>
+          <div id="minSeatsWrap" class="hidden flex items-center gap-2 pl-6 text-xs text-[#cfc9d8]">
+            <label for="fMinSeats" class="text-[#8d879a]">Min. adjacent seats:</label>
+            <select id="fMinSeats" class="bg-[#0b0a10] border border-[#2d2a38] rounded px-2 py-0.5 text-xs text-white">
+              <option value="1" selected>1 seat</option>
+              <option value="2">2 seats together</option>
+              <option value="3">3 seats together</option>
+              <option value="4">4 seats together</option>
+            </select>
+          </div>
+        </div>
+
         <div><label class="label" for="fEmail">Alert email</label><input type="email" id="fEmail" required class="field" placeholder="you@example.com"></div>
 
         <button type="submit" class="btn-primary w-full py-3 text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-eye"></i>Start watching</button>
@@ -737,6 +754,7 @@
             ${w.dates.map(d => `<span class="chip">${prettyDate(d)}</span>`).join('')}
           </div>
           <div class="flex flex-wrap gap-1.5 mt-2">
+            ${w.prime_seats_only ? `<span class="chip on" title="Prime seating only"><i class="fa-solid fa-crown mr-1"></i>Prime Seats (${w.min_seats_together || 1}+ together)</span>` : ''}
             ${w.formats.map(f => `<span class="chip">${esc(f)}</span>`).join('')}
             ${w.cinemas.map(c => `<span class="chip"><i class="fa-solid fa-building"></i>${esc(c)}</span>`).join('')}
           </div>
@@ -763,6 +781,8 @@
         dates: [...selectedDates].sort(),
         cinemas: [...selectedCinemas],
         formats: [...selectedFormats],
+        prime_seats_only: !!$('fPrimeSeats')?.checked,
+        min_seats_together: parseInt($('fMinSeats')?.value || '1', 10),
       };
       try {
         const res = await authFetch('/api/watches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -770,6 +790,7 @@
         if (!res.ok) return showToast(data.error || 'Could not save that watch.', true);
         showToast(`Eyes on ${payload.movie_title}.`);
         $('watchForm').reset();
+        $('minSeatsWrap')?.classList.add('hidden');
         selectedFormats.clear();
         selectedFilm = null;
         onFilmChange();

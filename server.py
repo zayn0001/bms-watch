@@ -257,6 +257,8 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             cinemas = payload.get("cinemas") or []
             formats = payload.get("formats") or []
             language = (payload.get("language") or "english").strip().lower()
+            prime_seats_only = bool(payload.get("prime_seats_only", False))
+            min_seats_together = int(payload.get("min_seats_together", 1) or 1)
             email, user_id = user["email"], user["id"]   # from the verified token, never the body
 
             if not event_code:
@@ -277,6 +279,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
                 "user_id": user_id, "movie_title": title, "event_code": event_code, "movie_slug": slug,
                 "region_code": region_code, "region_slug": region_slug, "language": language,
                 "dates": dates, "cinemas": cinemas, "formats": formats, "email": email, "is_active": True,
+                "prime_seats_only": prime_seats_only, "min_seats_together": min_seats_together,
             }, prefer="return=representation")
             return self._json(201, {"status": "created", "watch_id": row[0]["id"]})
 

@@ -727,6 +727,135 @@ def is_status_increase(old_label: str, new_label: str, kind: str) -> bool:
     return False
 
 
+PRIME_CATEGORY_KEYWORDS = {
+    "prime", "executive", "club", "royal", "premium", "recliner",
+    "vip", "gold", "diamond", "platinum", "balcony", "sofa", "elite", "lounge"
+}
+
+
+def is_prime_category(cat_name: str) -> bool:
+    name = (cat_name or "").lower()
+    return any(kw in name for kw in PRIME_CATEGORY_KEYWORDS)
+
+
+def check_seats_headless(venue_code: str, session_id: str, min_together: int = 1) -> dict:
+    """Attempts to inspect exact seat layout via Playwright headless Chrome.
+    Adheres strictly to security and compliance guidelines: if BookMyShow presents a
+    Cloudflare Turnstile or anti-bot challenge ('Attention Required! | Cloudflare'),
+    it does NOT attempt to bypass or solve it, and cleanly returns {'ok': False, 'blocked_by_cloudflare': True}.
+    """
+    if not venue_code or not session_id:
+        return {"ok": False, "reason": "missing_session"}
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"ok": False, "reason": "playwright_not_installed"}
+
+    url = f"https://in.bookmyshow.com/booktickets/{venue_code}/{session_id}"
+    chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    edge_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    exec_path = chrome_path if os.path.exists(chrome_path) else (edge_path if os.path.exists(edge_path) else None)
+
+    try:
+        with sync_playwright() as p:
+            launch_args = {"headless": True}
+            if exec_path:
+                launch_args["executable_path"] = exec_path
+            browser = p.chromium.launch(**launch_args)
+            try:
+                page = browser.new_page()
+                page.set_default_timeout(12000)
+                resp = page.goto(url, wait_until="domcontentloaded")
+                title = page.title()
+
+                # Stop immediately if Cloudflare challenge is encountered
+                if "attention required" in title.lower() or "cloudflare" in title.lower() or (resp and resp.status == 403):
+                    log.info("BookMyShow presented Cloudflare challenge for %s. Bypassing is prohibited; using API category verification.", url)
+                    return {"ok": False, "blocked_by_cloudflare": True}
+
+                result = page.evaluate("""() => {
+                    const seats = Array.from(document.querySelectorAll('a._available, ._available, [data-seat-status="0"]'));
+                    return seats.map(s => s.innerText.trim() || s.getAttribute('data-seat-id') || '');
+                }""")
+                clean_seats = [s for s in result if s]
+                return {"ok": True, "seats": clean_seats, "count": len(clean_seats)}
+            finally:
+                browser.close()
+    except Exception as e:
+        log.warning("Headless seat lookup failed for %s/%s: %s", venue_code, session_id, e)
+        return {"ok": False, "error": str(e)}
+
+
+def evaluate_prime_seats(show_obj: dict, old_show_obj: dict | None = None, min_together: int = 1) -> dict:
+    """Evaluates whether prime/center seating is available and calculates seat deltas.
+    Attempts headless browser inspection if accessible, falling back to official BMS category API metadata.
+    """
+    venue_code = show_obj.get("venue_code", "")
+    session_id = show_obj.get("session_id", "")
+
+    cats = show_obj.get("categories") or []
+    prime_cats = [c for c in cats if is_prime_category(c.get("type", ""))]
+    avail_prime_cats = [c for c in prime_cats if "avail" in c.get("status", "").lower()]
+
+    old_cats = (old_show_obj or {}).get("categories") or []
+    old_prime_cats = [c for c in old_cats if is_prime_category(c.get("type", ""))]
+    old_avail_cats = [c for c in old_prime_cats if "avail" in c.get("status", "").lower()]
+
+    # Attempt headless layout inspection
+    headless_res = check_seats_headless(venue_code, session_id, min_together)
+
+    if headless_res.get("ok"):
+        seats = headless_res.get("seats", [])
+        old_seats = (old_show_obj or {}).get("prime_seat_ids") or []
+        newly_freed = set(seats) - set(old_seats)
+        delta = len(newly_freed) if old_seats else len(seats)
+        show_obj["prime_seat_ids"] = seats
+
+        has_prime = len(seats) >= min_together
+        if has_prime:
+            seat_summary = f"{len(seats)} Prime Seat(s) available"
+            if delta > 0 and len(old_seats) > 0:
+                seat_summary += f" (+{delta} newly freed)"
+            if seats[:6]:
+                seat_summary += f": {', '.join(seats[:6])}{'...' if len(seats) > 6 else ''}"
+        else:
+            seat_summary = "Prime center seats unavailable"
+
+        return {
+            "is_prime_available": has_prime,
+            "available_seats_count": len(seats),
+            "more_seats_count": delta if has_prime else 0,
+            "seat_labels": seats,
+            "summary": seat_summary,
+            "method": "headless_layout",
+        }
+
+    # Fallback to verified BMS category metadata
+    has_prime = (len(avail_prime_cats) > 0) if cats else (show_obj.get("avail_status", 0) >= 2)
+    delta_cats = len(avail_prime_cats) - len(old_avail_cats)
+
+    cat_names = [f"{c['type']} ({c.get('price', '')})" for c in avail_prime_cats]
+    if has_prime and cat_names:
+        summary = f"Prime seats available: {', '.join(cat_names)}"
+        if delta_cats > 0 and len(old_avail_cats) > 0:
+            summary += f" (+{delta_cats} tier(s) freed up)"
+    elif has_prime:
+        summary = "Prime seating available"
+    else:
+        summary = "Prime seats unavailable (budget/front rows only)"
+
+    return {
+        "is_prime_available": has_prime,
+        "available_seats_count": len(avail_prime_cats),
+        "more_seats_count": max(0, delta_cats) if has_prime else 0,
+        "seat_labels": [],
+        "prime_categories": cat_names,
+        "summary": summary,
+        "method": "api_categories",
+    }
+
+
 def matches_watch_filters(diff_item: tuple, watch: dict) -> bool:
     """Checks if a detected diff matches the user's specific cinema and format criteria."""
     kind, cinema, show_key, old_label, new_label, show_obj = diff_item
@@ -742,6 +871,14 @@ def matches_watch_filters(diff_item: tuple, watch: dict) -> bool:
     target_formats = watch.get("formats") or []
     if target_formats and show_key:
         if not any(f.lower() in show_key.lower() for f in target_formats):
+            return False
+
+    # Filter prime seating if enabled
+    if watch.get("prime_seats_only"):
+        if not show_obj:
+            return False
+        prime_info = show_obj.get("prime_info")
+        if not prime_info or not prime_info.get("is_prime_available"):
             return False
 
     return True
@@ -783,6 +920,15 @@ def generate_email_html(watch: dict, changes_by_date: dict) -> str:
                 session_url = f"https://in.bookmyshow.com/booktickets/{show_obj['venue_code']}/{show_obj['session_id']}"
                 direct_link = f"<br><a href='{session_url}' style='color:#eb4e62;font-size:12px;font-weight:700'>Direct Seat Selection &rsaquo;</a>"
 
+            prime_badge = ""
+            if show_obj and show_obj.get("prime_info"):
+                p_info = show_obj["prime_info"]
+                p_text = html.escape(p_info.get("summary", ""))
+                if p_info.get("is_prime_available"):
+                    prime_badge = f"<div style='margin-top:4px;font-size:12px;color:#92400e;background:#fef3c7;padding:3px 8px;border-radius:4px;display:inline-block'>👑 <b>{p_text}</b></div>"
+                else:
+                    prime_badge = f"<div style='margin-top:4px;font-size:12px;color:#64748b;background:#f1f5f9;padding:3px 8px;border-radius:4px;display:inline-block'>👑 <i>{p_text}</i></div>"
+
             rows.append(f"""
             <tr>
               <td style="{cell};width:100px">
@@ -793,6 +939,7 @@ def generate_email_html(watch: dict, changes_by_date: dict) -> str:
               <td style="{cell}">
                 <b>{html.escape(cinema)}</b>
                 {f"<div style='color:#555555;font-size:13px;margin-top:2px'>{html.escape(show_key)}</div>" if show_key else ""}
+                {prime_badge}
                 {direct_link}
               </td>
               <td style="{cell};text-align:right">
@@ -928,7 +1075,18 @@ def _run_check_cycle() -> dict:
             if key not in new_snapshots:
                 continue
             diffs = calculate_diff(old_snapshots.get(key) or {}, new_snapshots[key])
-            matched = [diff for diff in diffs if matches_watch_filters(diff, w)]
+            matched = []
+            for diff in diffs:
+                kind, cinema, show_key, old_label, new_label, show_obj = diff
+                # Always evaluate prime seat info when availability increased
+                if show_obj and is_status_increase(old_label, new_label, kind):
+                    if "prime_info" not in show_obj:
+                        old_show = (old_snapshots.get(key) or {}).get(cinema, {}).get(show_key)
+                        show_obj["prime_info"] = evaluate_prime_seats(
+                            show_obj, old_show, min_together=w.get("min_seats_together", 1)
+                        )
+                if matches_watch_filters(diff, w):
+                    matched.append(diff)
             if matched:
                 watch_changes_by_date[d] = matched
                 total_changes += len(matched)
@@ -936,11 +1094,21 @@ def _run_check_cycle() -> dict:
         update = {"last_checked_at": now_str}
         if watch_changes_by_date:
             n = sum(map(len, watch_changes_by_date.values()))
-            log.info("Watch %s (%s): %d matching change(s) found!", w["id"], w["movie_title"], n)
+            prime_details = ""
+            for changes_list in watch_changes_by_date.values():
+                for c in changes_list:
+                    p_info = (c[5] or {}).get("prime_info")
+                    if p_info and p_info.get("summary"):
+                        prime_details = f" ({p_info['summary']})"
+                        break
+                if prime_details:
+                    break
+
+            log.info("Watch %s (%s): %d matching change(s) found!%s", w["id"], w["movie_title"], n, prime_details)
             try:
                 if send_email_alert(w, watch_changes_by_date):
                     sb("POST", "alert_logs", {"watch_id": w["id"], "user_id": w["user_id"], "title": f"Alert for {w['movie_title']}",
-                                              "details": f"{n} change(s) detected", "sent_to": w.get("email", ""), "created_at": now_str})
+                                              "details": f"{n} change(s) detected{prime_details}", "sent_to": w.get("email", ""), "created_at": now_str})
                     update["last_alert_at"] = now_str
             except Exception:
                 log.exception("Failed sending email alert for watch %s", w["id"])

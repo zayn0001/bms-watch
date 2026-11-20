@@ -58,6 +58,15 @@ def main():
         import bms_core
         with bms_core._CHECK_LOCK:
             assert run_check_cycle()["status"] == "busy", "Concurrent check was not blocked"
+        print("Running prime seats filter test...")
+        from bms_core import evaluate_prime_seats, matches_watch_filters
+        test_show = {
+            "venue_code": "", "session_id": "", "avail_status": 3,
+            "categories": [{"type": "PRIME ROWS", "status": "AVAILABLE", "price": "250"}]
+        }
+        test_show["prime_info"] = evaluate_prime_seats(test_show, min_together=1)
+        test_diff = ("changed", "Cinema 1", "07:00 PM", "SOLD OUT", "AVAILABLE", test_show)
+        assert matches_watch_filters(test_diff, {"prime_seats_only": True, "min_seats_together": 1}), "Prime seat match failed"
         print("All tests passed successfully!")
         return
 
