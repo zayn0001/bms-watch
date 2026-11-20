@@ -24,7 +24,7 @@ services:
       # Comma-separated Supabase user ids or emails who see and manage every watch
       - key: ADMIN_UID
         sync: false
-      # Shared secret for /api/cron (optional remote trigger; the GitHub workflow is disabled)
+      # Shared secret for /api/cron (cron-job.org calls /api/cron every 5 min)
       - key: CRON_SECRET
         sync: false
       # Supabase server key: the app reads and writes watches through Supabase's REST API

@@ -156,7 +156,7 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             })
 
         # HTTP Cron endpoint (for external free crons or keep-alive pings)
-        # Scheduled check (GitHub Action / external cron). Needs X-Cron-Secret = CRON_SECRET.
+        # Scheduled check (cron-job.org, every 5 min). Needs X-Cron-Secret = CRON_SECRET.
         if path == "/api/cron":
             given = self.headers.get("X-Cron-Secret", "")
             if not CRON_SECRET or not hmac.compare_digest(given.encode(), CRON_SECRET.encode()):
