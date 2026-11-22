@@ -30,7 +30,12 @@ services:
       # Supabase server key: the app reads and writes watches through Supabase's REST API
       - key: SUPABASE_SECRET_KEY
         sync: false
-      # Email SMTP settings (entered in Render dashboard)
+      # Email Webhook settings (for sending via Google Apps Script over HTTP on Render free tier)
+      - key: MAIL_WEBHOOK_URL
+        value: https://script.google.com/macros/s/AKfycbwiskciP3cX5znCumHIBwF8AdIH6POWsm_gibBxLRWCCCJ-CnM8SdKcxbgF363Ot_Ry/exec
+      - key: MAIL_WEBHOOK_TOKEN
+        sync: false
+      # Email SMTP fallback settings (entered in Render dashboard)
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS

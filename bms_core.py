@@ -47,6 +47,14 @@ DEFAULT_MAIL_TO = [e.strip() for e in os.getenv("MAIL_TO", DEFAULT_SMTP_USER).sp
 DEFAULT_SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 DEFAULT_SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 
+# HTTP Mail Webhook (Google Apps Script / transactional mail API)
+# Solves Render Free tier blocking outbound SMTP ports 25, 465, and 587
+DEFAULT_MAIL_WEBHOOK_URL = os.getenv(
+    "MAIL_WEBHOOK_URL",
+    "https://script.google.com/macros/s/AKfycbwiskciP3cX5znCumHIBwF8AdIH6POWsm_gibBxLRWCCCJ-CnM8SdKcxbgF363Ot_Ry/exec"
+)
+DEFAULT_MAIL_WEBHOOK_TOKEN = os.getenv("MAIL_WEBHOOK_TOKEN", "")
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://ismyhkcsxrswqsfzfrxe.supabase.co").rstrip("/")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 
@@ -982,19 +990,64 @@ def generate_email_html(watch: dict, changes_by_date: dict) -> str:
 
 def send_email_alert(watch: dict, changes_by_date: dict, smtp_user: str = "", smtp_pass: str = "", smtp_host: str = "", smtp_port: int = 0):
     user = smtp_user or DEFAULT_SMTP_USER
-    pwd = smtp_pass or DEFAULT_SMTP_PASS
-    host = smtp_host or DEFAULT_SMTP_HOST
-    port = smtp_port or DEFAULT_SMTP_PORT
     recipient = watch.get("email") or (DEFAULT_MAIL_TO[0] if DEFAULT_MAIL_TO else "")
 
-    if not user or not pwd or not recipient:
-        log.warning("Email not sent: missing SMTP credentials or recipient (user=%s, recipient=%s)", user, recipient)
+    if not recipient:
+        log.warning("Email not sent: missing recipient for watch %s", watch.get("id"))
         return False
 
     movie_title = watch.get("movie_title", "Movie")
     subject = f"🎟️ BMS Watch: Tickets Available for {movie_title}!"
     html_body = generate_email_html(watch, changes_by_date)
     text_body = f"BookMyShow Update for {movie_title}!\n\nTickets/screens opened for your watch.\nCheck BookMyShow now."
+
+    # Priority 1: HTTP Mail Webhook (Google Apps Script / Mail API)
+    # Allows sending over HTTPS (port 443), avoiding Render Free tier SMTP firewall blocks
+    webhook_url = os.getenv("MAIL_WEBHOOK_URL", DEFAULT_MAIL_WEBHOOK_URL)
+    webhook_token = os.getenv("MAIL_WEBHOOK_TOKEN", DEFAULT_MAIL_WEBHOOK_TOKEN)
+
+    if webhook_url:
+        payload = {
+            "token": webhook_token,
+            "to": recipient,
+            "subject": subject,
+            "htmlBody": html_body,
+            "textBody": text_body,
+        }
+        try:
+            req = urllib.request.Request(
+                webhook_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=25) as r:
+                res_body = r.read().decode("utf-8")
+                try:
+                    res_json = json.loads(res_body)
+                except Exception:
+                    res_json = {}
+                if res_json.get("status") == "ok" or res_json.get("success"):
+                    log.info("Email alert successfully sent via Webhook to %s for watch %s", recipient, watch.get("id"))
+                    return True
+                elif res_json.get("error"):
+                    log.error("Webhook rejected email to %s: %s", recipient, res_json.get("error"))
+                    # If webhook rejected unauthorized or other error, fallback to SMTP if configured
+                    if not (smtp_pass or DEFAULT_SMTP_PASS):
+                        return False
+                else:
+                    log.info("Webhook replied %d: %s", r.status, res_body[:200])
+                    return True
+        except Exception as e:
+            log.warning("Webhook email delivery failed (%s), attempting SMTP fallback: %s", type(e).__name__, e)
+
+    # Priority 2: SMTP SSL Fallback (for local CLI runs or paid instances)
+    pwd = smtp_pass or DEFAULT_SMTP_PASS
+    host = smtp_host or DEFAULT_SMTP_HOST
+    port = smtp_port or DEFAULT_SMTP_PORT
+
+    if not user or not pwd:
+        log.warning("Email not sent: missing SMTP credentials (user=%s, recipient=%s)", user, recipient)
+        return False
 
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -1007,7 +1060,7 @@ def send_email_alert(watch: dict, changes_by_date: dict, smtp_user: str = "", sm
         s.login(user, pwd)
         s.send_message(msg)
 
-    log.info("Email alert successfully sent to %s for watch %s", recipient, watch.get("id"))
+    log.info("Email alert successfully sent via SMTP to %s for watch %s", recipient, watch.get("id"))
     return True
 
 
@@ -1070,18 +1123,22 @@ def _run_check_cycle() -> dict:
 
     for w in watches:
         watch_changes_by_date = {}
+        is_initial_check = w.get("last_alert_at") is None
         for d in w.get("dates") or []:
             key = f"{w['event_code']}:{w['region_code']}:{d}"
             if key not in new_snapshots:
                 continue
-            diffs = calculate_diff(old_snapshots.get(key) or {}, new_snapshots[key])
+            # For new watches that haven't received an alert yet, diff against {} so they
+            # get alerted if shows are ALREADY bookable. Subsequent runs diff against old_snapshots.
+            base_snapshot = {} if is_initial_check else (old_snapshots.get(key) or {})
+            diffs = calculate_diff(base_snapshot, new_snapshots[key])
             matched = []
             for diff in diffs:
                 kind, cinema, show_key, old_label, new_label, show_obj = diff
                 # Always evaluate prime seat info when availability increased
                 if show_obj and is_status_increase(old_label, new_label, kind):
                     if "prime_info" not in show_obj:
-                        old_show = (old_snapshots.get(key) or {}).get(cinema, {}).get(show_key)
+                        old_show = base_snapshot.get(cinema, {}).get(show_key)
                         show_obj["prime_info"] = evaluate_prime_seats(
                             show_obj, old_show, min_together=w.get("min_seats_together", 1)
                         )
