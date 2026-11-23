@@ -578,7 +578,8 @@ def get_city_venues(region_code: str, region_slug: str = "") -> list[str]:
 
         def venues_for(m):
             try:
-                return set(parse_bms_showtimes(fetch_bms_showtimes(m["event_code"], today_ist(), region_code, region_slug)))
+                lang = m.get("language") or (get_region_languages(region_code)[0] if get_region_languages(region_code) else "english")
+                return set(parse_bms_showtimes(fetch_bms_showtimes(m["event_code"], today_ist(), region_code, region_slug, language=lang)))
             except Exception:
                 return set()
 
