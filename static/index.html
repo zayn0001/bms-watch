@@ -464,7 +464,21 @@
 
     // ---------------------------------------------------------------- BMS data
     async function loadRegions() {
-      try { regions = await (await fetch('/api/regions')).json(); } catch (err) { console.error('regions', err); }
+      try {
+        const res = await fetch('/api/regions');
+        if (res.ok) {
+          regions = await res.json();
+          if (regions && regions.length > 100) return;
+        }
+      } catch (err) {
+        console.warn('api/regions failed, trying static catalog', err);
+      }
+      try {
+        const resStatic = await fetch('/regions.json');
+        if (resStatic.ok) regions = await resStatic.json();
+      } catch (e2) {
+        console.error('regions fallback', e2);
+      }
     }
 
     async function loadCityVenues() {
@@ -506,15 +520,17 @@
       if (!q) return regions.filter(r => r.top).map(r => ({ r }));
       const hits = [];
       for (const r of regions) {
-        const n = r.name.toLowerCase(), aliases = (r.aliases || []).map(a => a.toLowerCase());
+        const n = (r.name || '').toLowerCase(), aliases = (r.aliases || []).map(a => a.toLowerCase()), state = (r.state || '').toLowerCase();
         let score = 9, via = '';
         if (n.startsWith(q)) score = 0;
         else if ((via = aliases.find(a => a.startsWith(q)))) score = 0;
         else if (n.includes(q)) score = 1;
         else if ((via = aliases.find(a => a.includes(q)))) score = 1;
+        else if (state && state.startsWith(q)) { score = 2; via = r.state; }
+        else if (state && state.includes(q)) { score = 3; via = r.state; }
         if (score < 9) hits.push({ r, score, via: via && !n.includes(q) ? via : '' });
       }
-      return hits.sort((a, b) => a.score - b.score || b.r.top - a.r.top || a.r.name.localeCompare(b.r.name)).slice(0, 8);
+      return hits.sort((a, b) => a.score - b.score || b.r.top - a.r.top || a.r.name.localeCompare(b.r.name)).slice(0, 15);
     }
 
     function setupCityBox(box) {

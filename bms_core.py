@@ -133,6 +133,31 @@ REGION_LANGUAGES = {
     "CHAN": ["hindi", "punjabi", "english"],
 }
 
+STATE_LANGUAGES = {
+    "kerala": ["malayalam", "english", "tamil", "hindi"],
+    "tamil nadu": ["tamil", "english", "hindi"],
+    "karnataka": ["kannada", "english", "hindi", "tamil", "telugu"],
+    "andhra": ["telugu", "english", "hindi"],
+    "telangana": ["telugu", "english", "hindi"],
+    "maharashtra": ["marathi", "hindi", "english"],
+    "west bengal": ["bengali", "hindi", "english"],
+    "gujarat": ["gujarati", "hindi", "english"],
+    "punjab": ["punjabi", "hindi", "english"],
+}
+
+def get_region_languages(region_code: str) -> list[str]:
+    code = (region_code or "").upper()
+    if code in REGION_LANGUAGES:
+        return REGION_LANGUAGES[code]
+    for r in get_bms_regions():
+        if r.get("code") == code:
+            state = (r.get("state") or "").lower()
+            for st, langs in STATE_LANGUAGES.items():
+                if st in state:
+                    return langs
+            break
+    return ["malayalam", "tamil", "telugu", "hindi", "english", "kannada"]
+
 log = logging.getLogger("bms_watch.core")
 
 _CACHE_REGIONS = None
@@ -143,26 +168,44 @@ def get_bms_regions() -> list[dict]:
     global _CACHE_REGIONS
     if _CACHE_REGIONS:
         return _CACHE_REGIONS
+
+    # 1. Pre-packaged full static catalog (2,000+ cities including Koppam, Perinthalmanna)
+    static_file = ROOT_DIR / "static" / "regions.json"
+    if static_file.exists():
+        try:
+            loaded = json.loads(static_file.read_text(encoding="utf-8"))
+            if loaded and isinstance(loaded, list):
+                _CACHE_REGIONS = loaded
+                return _CACHE_REGIONS
+        except Exception:
+            pass
+
+    # 2. Live fetch from BookMyShow if static file is unavailable
     try:
         req = urllib.request.Request("https://in.bookmyshow.com/api/explore/v1/discover/regions", headers=BMS_HEADERS)
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=12) as r:
             d = json.load(r)
         bms = d.get("BookMyShow", {})
         cities = []
+        seen = set()
         for group in ("TopCities", "OtherCities"):
             for c in bms.get(group, []):
+                code = c.get("RegionCode")
+                if not code or code in seen:
+                    continue
+                seen.add(code)
                 try:
                     lat, lon = float(c["Lat"]), float(c["Long"])
                 except (KeyError, TypeError, ValueError):
                     lat = lon = None
                 cities.append({
-                    "code": c.get("RegionCode"),
+                    "code": code,
                     "name": c.get("RegionName"),
                     "slug": c.get("RegionSlug"),
                     "lat": lat,
                     "lon": lon,
                     "top": group == "TopCities",
-                    "aliases": (c.get("Alias") or []) + EXTRA_CITY_ALIASES.get(c.get("RegionCode"), []),
+                    "aliases": (c.get("Alias") or []) + EXTRA_CITY_ALIASES.get(code, []),
                     "state": c.get("StateName") or "",
                 })
         if cities:
@@ -170,6 +213,7 @@ def get_bms_regions() -> list[dict]:
             return cities
     except Exception:
         log.exception("Failed fetching live BMS regions, using fallback list")
+
     return POPULAR_REGIONS
 
 
@@ -180,8 +224,9 @@ def resolve_region_slug(region_code: str, fallback_slug: str = "") -> str:
     for r in POPULAR_REGIONS:
         if r["code"] == code:
             return r["slug"]
-    if _CACHE_REGIONS:
-        for r in _CACHE_REGIONS:
+    all_regions = get_bms_regions()
+    if all_regions:
+        for r in all_regions:
             if r.get("code") == code and r.get("slug"):
                 return r["slug"]
     return code.lower()
@@ -559,10 +604,10 @@ def get_movie_info(event_code: str, region_code: str, region_slug: str, movie_sl
     candidates = []
     if language and language.strip():
         candidates.append(language.strip().lower())
-    for r_lang in REGION_LANGUAGES.get(region_code, ["english", "hindi", "tamil"]):
+    for r_lang in get_region_languages(region_code):
         if r_lang not in candidates:
             candidates.append(r_lang)
-    for default_lang in ["english", "hindi", "tamil"]:
+    for default_lang in ["english", "hindi", "tamil", "malayalam"]:
         if default_lang not in candidates:
             candidates.append(default_lang)
 

@@ -164,9 +164,9 @@ class BMSWatchHandler(SimpleHTTPRequestHandler):
             res = run_check_cycle()
             return self._json(200, res)
 
-        # Dynamic BMS Regions
+        # Dynamic BMS Regions (serves complete 2,000+ city catalog)
         if path == "/api/regions":
-            return self._json(200, get_bms_regions())
+            return self._json(200, get_bms_regions(), headers={"Cache-Control": "public, max-age=86400"})
 
         # Dynamic BMS Live Movies (Running or Upcoming)
         if path == "/api/bms/movies":
